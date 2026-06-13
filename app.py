@@ -203,23 +203,32 @@ for ticker, data in analysis["per_stock"].items():
 
 df = pd.DataFrame(rows)
 
+display_cols = ["Hisse", "Ad", "Ağırlık", "Fiyat (₺)", "Değişim", "Hacim/Ort", "Durum"]
+
 
 def highlight_rows(row):
+    """Tam DataFrame üzerinde çalışır, gizli sütunlara erişebilir."""
+    color = ""
     if row["_critical"]:
-        return ["background-color: #fce8e6"] * len(row)
-    if row["_rotation"]:
-        return ["background-color: #e8f5e9"] * len(row)
-    if row["_error"]:
-        return ["background-color: #f1f3f4"] * len(row)
-    if row["_change"] < 0:
-        return ["background-color: #fef7e0"] * len(row)
-    return [""] * len(row)
+        color = "background-color: #fce8e6"
+    elif row["_rotation"]:
+        color = "background-color: #e8f5e9"
+    elif row["_error"]:
+        color = "background-color: #f1f3f4"
+    elif row["_change"] < 0:
+        color = "background-color: #fef7e0"
+    return [color] * len(row)
 
 
-display_cols = ["Hisse", "Ad", "Ağırlık", "Fiyat (₺)", "Değişim", "Hacim/Ort", "Durum"]
-styled = df[display_cols].style.apply(highlight_rows, axis=1)
+styled = df.style.apply(highlight_rows, axis=1)
 
-st.dataframe(styled, use_container_width=True, hide_index=True, height=(len(rows) + 1) * 38)
+st.dataframe(
+    styled,
+    column_order=display_cols,
+    use_container_width=True,
+    hide_index=True,
+    height=(len(rows) + 1) * 38,
+)
 
 # ---------------------------------------------------------------------------
 # Sistemik Risk
