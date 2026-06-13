@@ -1,0 +1,104 @@
+================================================================
+  TLY RİSK — ANDROİD KURULUM REHBERİ
+================================================================
+
+İKİ SEÇENEK VAR. HANGİSİ SANA UYGUNSA ONU SEÇ:
+
+  A) Pydroid 3 ile (KOLAY — 5 dakika, APK gerekmez)
+  B) Kendi APK'nı üret   (ZOR — Linux + buildozer gerekir)
+
+
+
+================================================================
+SEÇENEK A: PYDROID 3 İLE ÇALIŞTIRMA  (ÖNERİLEN)
+================================================================
+
+1. Google Play Store'dan "Pydroid 3" uygulamasını indir ve kur.
+
+2. Pydroid 3'ü aç. Sol menüden "Pip"e gir, şunları tek tek yükle:
+     yfinance
+     pandas
+     numpy
+     tabulate
+   (Kivy ve colorama Pydroid 3 içinde hazır gelir.)
+
+3. Pydroid 3 ana ekranında sağ üstteki klasör simgesine tıkla.
+   "tly_risk" klasörünün tamamını telefonuna kopyala
+   (USB kablosuyla veya Google Drive ile).
+
+4. Pydroid 3 içinde tly_risk klasörüne gir,
+   "main_android.py" dosyasına tıkla,
+   sağ üstteki "Oynat ▶" düğmesine bas.
+
+5. Uygulama açılacak. Anapara miktarını gir (veya 500000 yazılı gelir),
+   "ANALİZİ BAŞLAT" düğmesine bas.
+
+   İnternet bağlantın açık olmalı (yfinance veriyi çekerken).
+
+
+
+================================================================
+SEÇENEK B: APK OLARAK PAKETLEME (Linux + buildozer)
+================================================================
+
+ÖN KOŞUL: Bilgisayarında Linux olmalı (Ubuntu 22.04 önerilir).
+          Windows'ta WSL2 Ubuntu da kullanabilirsin.
+
+ADIM 1 — buildozer kur
+  sudo apt update
+  sudo apt install -y python3-pip openjdk-17-jdk git zip unzip
+  pip3 install --user buildozer cython
+
+ADIM 2 — tly_risk klasörünü Linux'a kopyala
+
+ADIM 3 — APK'yi derle (klasör içinde):
+  cd tly_risk
+  buildozer init          ← sadece ilk sefer (buildozer.spec zaten var, atla)
+  buildozer android debug
+
+  Bu işlem 15-30 dakika sürer (ilk sefer SDK/NDK indirir).
+
+ADIM 4 — APK dosyasını bul:
+  bin/tlyrisk-1.0-arm64-v8a-debug.apk
+
+  Bu dosyayı telefona at, kur, çalıştır.
+
+
+
+================================================================
+SORUN GİDERME
+================================================================
+
+SORUN: "ModuleNotFoundError: No module named 'kivy'"
+  → Pydroid 3 kullanmıyorsan Kivy kur: pip install kivy
+
+SORUN: "yfinance veri çekemedi"
+  → İnternet bağlantını kontrol et.
+  → BIST seans saatleri dışında olabilirsin, son kapanışla çalışır.
+
+SORUN: APK kurulmuyor / "Uygulama yüklenemedi"
+  → Ayarlar → Güvenlik → "Bilinmeyen kaynaklara izin ver"i aç.
+
+SORUN: buildozer sırasında hata
+  → buildozer android clean
+  → buildozer android debug  (tekrar dene)
+
+
+
+================================================================
+DOSYA YAPISI (Android için gerekli olanlar)
+================================================================
+
+tly_risk/
+├── config.py              ← portföy tanımları
+├── data_fetcher.py        ← yfinance veri çekici
+├── risk_analyzer.py       ← risk motoru
+├── simulator.py           ← T+2 valör hesabı
+├── main_android.py        ← ★ ANDROID ANA UYGULAMA (Kivy)
+├── main.py                ← terminal sürümü (PC için)
+├── reporter.py            ← terminal raporu (PC için)
+├── buildozer.spec         ← APK paketleme ayarları
+├── requirements.txt       ← PC bağımlılıkları
+└── requirements_android.txt ← Android bağımlılıkları
+
+================================================================
