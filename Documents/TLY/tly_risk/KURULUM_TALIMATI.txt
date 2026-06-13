@@ -1,0 +1,131 @@
+================================================================
+  TLY RİSK ANALİZ ARACI - KURULUM TALİMATI
+================================================================
+
+KISA ÖZET
+---------
+Sadece bu "tly_risk" klasörünü kopyala, Python kur,
+2 komut çalıştır, hazır.
+
+
+================================================================
+ADIM 1 — PYTHON KURULUMU
+================================================================
+
+Python 3.9 veya üzeri gereklidir.
+
+  İndir: https://www.python.org/downloads/
+
+Kurulum sırasında DİKKAT:
+  → "Add Python to PATH" kutucuğunu mutlaka işaretle!
+
+Kurulumu doğrulamak için Komut İstemi (cmd) aç ve yaz:
+
+  python --version
+
+Şuna benzer bir çıktı görmelisin:
+  Python 3.11.4
+
+
+================================================================
+ADIM 2 — KLASÖRÜ KOPYALA
+================================================================
+
+"tly_risk" klasörünün tamamını yeni bilgisayara kopyala.
+İçinde şu dosyalar olmalı:
+
+  tly_risk/
+  ├── config.py
+  ├── data_fetcher.py
+  ├── risk_analyzer.py
+  ├── simulator.py
+  ├── reporter.py
+  ├── main.py
+  ├── requirements.txt
+  └── KURULUM_TALIMATI.txt  ← bu dosya
+
+
+================================================================
+ADIM 3 — GEREKLİ KÜTÜPHANELERİ YÜKLE
+================================================================
+
+Komut İstemi'ni (cmd) aç.
+"tly_risk" klasörünün içine gir:
+
+  cd C:\...\tly_risk       (klasörün tam yolunu yaz)
+
+Sonra şu komutu çalıştır:
+
+  pip install -r requirements.txt
+
+İnternet bağlantısı gerekir. Birkaç dakika sürebilir.
+Hata alırsan bir alt satırda çözüm var.
+
+  --- Sık Karşılaşılan Hata ---
+  "'pip' komut tanınmıyor" diyorsa şunu dene:
+
+    python -m pip install -r requirements.txt
+
+
+================================================================
+ADIM 4 — PROGRAMI ÇALIŞTIR
+================================================================
+
+Hâlâ "tly_risk" klasörünün içindeyken:
+
+  python main.py
+
+Program sana iki soru soracak:
+  1. Portföyde değişiklik var mı? → h (Enter)
+  2. Anapara miktarı?            → Enter (500.000 TL varsayılan)
+
+Sonra otomatik veri çekip raporu gösterecek.
+
+
+================================================================
+SONRAKI AYLARDA PORTFÖY GÜNCELLEME
+================================================================
+
+Her ay KAP raporu çıktığında config.py dosyasını güncelle:
+
+  1. config.py dosyasını Not Defteri ile aç
+  2. Değişen hisselerin "weight" değerini güncelle
+  3. Eski "weight" değerini "prev_weight" alanına taşı
+  4. "EQUITY_RATIO" değerini de güncelle
+  5. Kaydet → python main.py çalıştır
+
+
+================================================================
+INTERNET BAĞLANTISI ZORUNLU MU?
+================================================================
+
+  EVET — program Yahoo Finance'den anlık veri çeker.
+  İnternet olmadan çalışmaz.
+
+  En iyi sonuç için:
+  Borsa açıkken çalıştır (Haftaiçi 10:00 – 18:00 arası).
+
+
+================================================================
+SORUN GİDERME
+================================================================
+
+SORUN   : "ModuleNotFoundError: No module named 'yfinance'"
+ÇÖZÜM   : pip install -r requirements.txt komutunu tekrar çalıştır
+
+SORUN   : "python tanınmıyor"
+ÇÖZÜM   : Python'u PATH'e ekleyerek yeniden kur
+
+SORUN   : Hisse verisi "HATA" olarak geliyor
+ÇÖZÜM   : İnternet bağlantını kontrol et.
+           Yahoo Finance bazen BIST verilerini geç yükler,
+           birkaç dakika sonra tekrar dene.
+
+SORUN   : Tüm hisseler "VERİ YOK" gösteriyor
+ÇÖZÜM   : Borsa kapalı olabilir (hafta sonu / resmi tatil).
+           Program son kapanış fiyatıyla çalışır, sorun değil.
+
+
+================================================================
+  Hazırlayan: TLY Risk Analiz Aracı v1.0
+================================================================
