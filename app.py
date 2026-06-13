@@ -256,7 +256,10 @@ with col_a:
 
 with col_b:
     if corr is not None:
-        st.progress(min(corr / 1.0, 1.0), text=f"Korelasyon: {corr:.2f}")
+        import math
+        safe_corr = corr if (isinstance(corr, (int, float)) and not math.isnan(corr)) else 0.0
+        clamped = max(0.0, min(1.0, safe_corr))
+        st.progress(clamped, text=f"Korelasyon: {safe_corr:.2f}")
     if s["is_critical"]:
         st.error("⚠️ KRİTİK: Döngüsel sermaye yapısında bozulma!")
     elif corr and corr > CORRELATION_THRESHOLD:
