@@ -39,10 +39,11 @@ st.markdown("""
     .main-header { font-size: 2rem; font-weight: 700; color: #1a73e8; margin-bottom: 0; }
     .sub-header  { font-size: 0.95rem; color: #5f6368; margin-top: 0; }
     .metric-card { background: #f8f9fa; border-radius: 12px; padding: 1rem; text-align: center; }
-    .critical-row { background: #fce8e6 !important; }
-    .rotation-row { background: #e8f5e9 !important; }
-    .warning-row  { background: #fef7e0 !important; }
     hr { margin: 0.5rem 0; }
+    /* Tablo hücrelerinde yazı rengini siyah olarak zorla */
+    [data-testid="stDataFrame"] td {
+        color: #000000 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -215,21 +216,21 @@ display_cols = ["Hisse", "Ad", "Ağırlık", "Fiyat (₺)", "Değişim", "Hacim/
 
 
 def highlight_rows(row):
-    """Tam DataFrame üzerinde çalışır, gizli sütunlara erişebilir."""
-    color = ""
+    """Satır durumuna göre arka plan rengi + siyah yazı."""
+    base = "color: #000000"
     if row["_critical"]:
-        color = "background-color: #fce8e6"
+        return [f"{base}; background-color: #fce8e6"] * len(row)
     elif row["_rotation"]:
-        color = "background-color: #e8f5e9"
+        return [f"{base}; background-color: #e8f5e9"] * len(row)
     elif row["_thin"]:
-        color = "background-color: #fef7e0"
+        return [f"{base}; background-color: #fef7e0"] * len(row)
     elif row["_fund"]:
-        color = "background-color: #e3f2fd"
+        return [f"{base}; background-color: #e3f2fd"] * len(row)
     elif row["_error"]:
-        color = "background-color: #f1f3f4"
+        return [f"{base}; background-color: #f1f3f4"] * len(row)
     elif row["_change"] < 0:
-        color = "background-color: #fef7e0"
-    return [color] * len(row)
+        return [f"{base}; background-color: #fef7e0"] * len(row)
+    return [base] * len(row)
 
 
 styled = df.style.apply(highlight_rows, axis=1)
