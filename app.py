@@ -11,11 +11,10 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
-import pandas as pd
 from datetime import date, datetime
 from config import (
     PORTFOLIO, EQUITY_RATIO, DEFAULT_CAPITAL, PANIC_RATE,
-    GROUP_TICKERS, CORRELATION_THRESHOLD, HISTORY_DAYS,
+    GROUP_TICKERS, CORRELATION_THRESHOLD,
 )
 from data_fetcher import fetch_all_portfolio_data
 from risk_analyzer import analyze_portfolio
@@ -40,10 +39,14 @@ st.markdown("""
     .sub-header  { font-size: 0.95rem; color: #5f6368; margin-top: 0; }
     .metric-card { background: #f8f9fa; border-radius: 12px; padding: 1rem; text-align: center; }
     hr { margin: 0.5rem 0; }
-    /* Tablo hücrelerinde yazı rengini siyah olarak zorla */
-    [data-testid="stDataFrame"] td {
-        color: #000000 !important;
-    }
+    .risk-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .risk-table th { color: #AAAAAA; text-align: left; padding: 8px 10px; border-bottom: 1px solid #333; font-weight: 600; }
+    .risk-table td { padding: 6px 10px; border-bottom: 1px solid #2A2A2A; }
+    .row-normal  td { background: #1E1E1E; color: #FFFFFF !important; }
+    .row-warning td { background: #3D2B00; color: #FFD700 !important; }
+    .row-fund    td { background: #0D2137; color: #60B4FF !important; }
+    .row-critical td { background: #3D0000; color: #FF6B6B !important; }
+    .row-error   td { background: #1E1E1E; color: #888888 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -162,7 +165,28 @@ with col5:
 st.markdown("---")
 st.markdown("### 📋 Risk Skoru Tablosu")
 
-rows = []
+# Satır tipine göre CSS class'ı belirle
+def _row_class(is_critical, is_rotation, is_thin, is_fund, is_error):
+    if is_critical:
+        return "row-critical"
+    elif is_rotation:
+        return "row-critical"  # rotasyon kritik değil ama yine de dikkat çekici
+    elif is_thin:
+        return "row-warning"
+    elif is_fund:
+        return "row-fund"
+    elif is_error:
+        return "row-error"
+    else:
+        return "row-normal"
+
+headers = ["Hisse", "Ad", "Ağırlık", "Fiyat (₺)", "Değişim", "Hacim/Ort", "Durum"]
+
+html = '<table class="risk-table"><thead><tr>'
+for h in headers:
+    html += f"<th>{h}</th>"
+html += "</tr></thead><tbody>"
+
 for ticker, data in analysis["per_stock"].items():
     short = ticker.replace(".IS", "")
     name = data.get("name", "?")
@@ -175,12 +199,12 @@ for ticker, data in analysis["per_stock"].items():
     is_rotation = data.get("is_rotation", False)
     is_thin = data.get("is_thin_market", False)
     is_fund = data.get("is_fund", False)
+    is_error = data.get("error", False)
 
     price_str = f"{price:,.4f}" if price is not None else ("---" if is_fund else "—")
     change_str = f"{change_pct:+.2f}%" if change_pct is not None else ("---" if is_fund else "—")
     vol_str = f"%{vol_ratio:.0f}" if vol_ratio is not None else ("---" if is_fund else "—")
 
-    # Durum emojisi
     if is_critical:
         status_icon = "🔴"
     elif is_rotation:
@@ -189,59 +213,26 @@ for ticker, data in analysis["per_stock"].items():
         status_icon = "🟡"
     elif is_fund:
         status_icon = "🔷"
-    elif data.get("error"):
+    elif is_error:
         status_icon = "⚫"
     else:
         status_icon = "🟢"
 
-    rows.append({
-        "Hisse": short,
-        "Ad": name,
-        "Ağırlık": f"%{weight:.2f}",
-        "Fiyat (₺)": price_str,
-        "Değişim": change_str,
-        "Hacim/Ort": vol_str,
-        "Durum": f"{status_icon} {liq_status}",
-        "_critical": is_critical,
-        "_rotation": is_rotation,
-        "_thin": is_thin,
-        "_fund": is_fund,
-        "_change": change_pct or 0,
-        "_error": data.get("error", False),
-    })
+    css_class = _row_class(is_critical, is_rotation, is_thin, is_fund, is_error)
 
-df = pd.DataFrame(rows)
+    html += f'<tr class="{css_class}">'
+    html += f"<td>{short}</td>"
+    html += f"<td>{name}</td>"
+    html += f"<td>%{weight:.2f}</td>"
+    html += f"<td>{price_str}</td>"
+    html += f"<td>{change_str}</td>"
+    html += f"<td>{vol_str}</td>"
+    html += f"<td>{status_icon} {liq_status}</td>"
+    html += "</tr>"
 
-display_cols = ["Hisse", "Ad", "Ağırlık", "Fiyat (₺)", "Değişim", "Hacim/Ort", "Durum"]
+html += "</tbody></table>"
 
-
-def highlight_rows(row):
-    """Satır durumuna göre arka plan rengi + siyah yazı."""
-    base = "color: #000000"
-    if row["_critical"]:
-        return [f"{base}; background-color: #fce8e6"] * len(row)
-    elif row["_rotation"]:
-        return [f"{base}; background-color: #e8f5e9"] * len(row)
-    elif row["_thin"]:
-        return [f"{base}; background-color: #fef7e0"] * len(row)
-    elif row["_fund"]:
-        return [f"{base}; background-color: #e3f2fd"] * len(row)
-    elif row["_error"]:
-        return [f"{base}; background-color: #f1f3f4"] * len(row)
-    elif row["_change"] < 0:
-        return [f"{base}; background-color: #fef7e0"] * len(row)
-    return [base] * len(row)
-
-
-styled = df.style.apply(highlight_rows, axis=1)
-
-st.dataframe(
-    styled,
-    column_order=display_cols,
-    use_container_width=True,
-    hide_index=True,
-    height=(len(rows) + 1) * 38,
-)
+st.markdown(html, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Sistemik Risk
