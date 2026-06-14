@@ -172,6 +172,7 @@ for ticker, data in analysis["per_stock"].items():
     liq_status = data.get("liquidity_status", "Normal")
     is_critical = data.get("is_critical", False)
     is_rotation = data.get("is_rotation", False)
+    is_thin = data.get("is_thin_market", False)
 
     price_str = f"{price:,.4f}" if price is not None else "—"
     change_str = f"{change_pct:+.2f}%" if change_pct is not None else "—"
@@ -182,6 +183,8 @@ for ticker, data in analysis["per_stock"].items():
         status_icon = "🔴"
     elif is_rotation:
         status_icon = "🔵"
+    elif is_thin:
+        status_icon = "🟡"
     elif data.get("error"):
         status_icon = "⚫"
     else:
@@ -197,6 +200,7 @@ for ticker, data in analysis["per_stock"].items():
         "Durum": f"{status_icon} {liq_status}",
         "_critical": is_critical,
         "_rotation": is_rotation,
+        "_thin": is_thin,
         "_change": change_pct or 0,
         "_error": data.get("error", False),
     })
@@ -213,6 +217,8 @@ def highlight_rows(row):
         color = "background-color: #fce8e6"
     elif row["_rotation"]:
         color = "background-color: #e8f5e9"
+    elif row["_thin"]:
+        color = "background-color: #fef7e0"
     elif row["_error"]:
         color = "background-color: #f1f3f4"
     elif row["_change"] < 0:
@@ -311,12 +317,15 @@ st.markdown("### 🚨 Uyarılar & Loglar")
 
 critical_alerts = analysis.get("critical_alerts", [])
 rotation_logs = analysis.get("rotation_logs", [])
+thin_market_alerts = analysis.get("thin_market_alerts", [])
 
-if not critical_alerts and not rotation_logs:
+if not critical_alerts and not rotation_logs and not thin_market_alerts:
     st.success("✅ Bugün için kritik uyarı yok.")
 else:
     for alert in critical_alerts:
         st.error(f"🔴 {alert}")
+    for alert in thin_market_alerts:
+        st.warning(f"🟡 {alert}")
     for log in rotation_logs:
         st.info(f"🔵 {log}")
 

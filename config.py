@@ -42,8 +42,8 @@ PORTFOLIO = {
         "category": "group",
         "prev_weight": 5.50,
     },
-    "UKA.IS": {
-        "name": "Uka GYF",
+    "TPKGY.IS": {
+        "name": "HAS Portföy GYF",
         "weight": 12.84,
         "category": "other",
         "prev_weight": 12.84,
@@ -67,6 +67,9 @@ CORRELATION_THRESHOLD = 0.80
 
 # Likidite kilitlenmesi için hacim eşiği (30 günlük ortalamanın yüzdesi)
 VOLUME_LOCKDOWN_THRESHOLD = 0.50  # %50 altı
+
+# Sığ piyasa uyarısı için hacim eşiği (30 günlük ortalamanın yüzdesi)
+VOLUME_THIN_MARKET_THRESHOLD = 0.20  # %20 altı → fiyat yönü bağımsız uyarı
 
 # Ağırlık eşiği (KURAL 1 için, % cinsinden)
 WEIGHT_THRESHOLD = 10.0

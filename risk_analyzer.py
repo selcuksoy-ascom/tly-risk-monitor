@@ -1,10 +1,11 @@
 # =============================================================================
 # risk_analyzer.py - Risk Analiz Motoru
 # =============================================================================
-# 3 temel kural ile yanlış sinyal üretimini engeller:
+# 4 temel kural ile yanlış sinyal üretimini engeller:
 #   KURAL 1 - Likidite Kilitlenmesi
 #   KURAL 2 - Başarılı Çıkış (False Positive Filtresi)
 #   KURAL 3 - Sistemik Çöküş Radarı
+#   KURAL 4 - Sığ Piyasa Uyarısı
 # =============================================================================
 
 import pandas as pd
@@ -14,6 +15,7 @@ from config import (
     WEIGHT_THRESHOLD,
     PRICE_DROP_THRESHOLD,
     VOLUME_LOCKDOWN_THRESHOLD,
+    VOLUME_THIN_MARKET_THRESHOLD,
     CORRELATION_THRESHOLD,
     GROUP_TICKERS,
 )
@@ -179,6 +181,45 @@ def check_systemic_collapse(
 
 
 # ---------------------------------------------------------------------------
+# KURAL 4: Sığ Piyasa Uyarısı
+# ---------------------------------------------------------------------------
+
+def check_thin_market(
+    ticker: str,
+    weight: float,
+    volume: int,
+    avg_volume: Optional[float],
+) -> Tuple[bool, str]:
+    """
+    KOŞUL D: Sığ piyasa — fiyat yönünden bağımsız likidite uyarısı.
+
+    Tetikleyici:
+      - Ağırlık > %10  (büyük pozisyon)
+      - Hacim < 30 günlük ortalamanın %20'si
+
+    Fiyat yükseliyor olsa bile tetiklenir. Amaç: pozisyon büyükken
+    piyasanın sığ olduğunu, çıkışta zorlanılacağını erkenden bildirmek.
+
+    Returns:
+        (is_thin, message)
+    """
+    if volume is None or avg_volume is None or avg_volume <= 0:
+        return False, ""
+
+    is_large_position = weight > WEIGHT_THRESHOLD
+
+    # Hacim oranı
+    volume_ratio = volume / avg_volume
+
+    is_thin_volume = volume_ratio < VOLUME_THIN_MARKET_THRESHOLD
+
+    if is_large_position and is_thin_volume:
+        return True, "SIĞ PİYASA: Büyük pozisyon, çok düşük hacimli piyasa"
+
+    return False, ""
+
+
+# ---------------------------------------------------------------------------
 # Ana Analiz Fonksiyonu
 # ---------------------------------------------------------------------------
 
@@ -199,6 +240,7 @@ def analyze_portfolio(
     per_stock = {}
     critical_alerts = []
     rotation_logs = []
+    thin_market_alerts = []
 
     for ticker, data in portfolio_data.items():
         if data.get("error"):
@@ -208,6 +250,7 @@ def analyze_portfolio(
                 "volume_ratio": None,
                 "is_critical": False,
                 "is_rotation": False,
+                "is_thin_market": False,
                 "alert_message": None,
             }
             continue
@@ -217,6 +260,12 @@ def analyze_portfolio(
         volume = data["volume"]
         avg_volume = data["avg_volume"]
         prev_weight = data.get("prev_weight", weight)
+
+        # Hacim oranı (tüm kurallarda kullanılacak)
+        if avg_volume and avg_volume > 0:
+            vol_ratio = (volume / avg_volume) * 100.0
+        else:
+            vol_ratio = 100.0
 
         # ----- KURAL 2 önce çalışır (false positive filtresi) -----
         is_rotation, rotation_msg = check_rotation_exit(
@@ -228,15 +277,24 @@ def analyze_portfolio(
             per_stock[ticker] = {
                 **data,
                 "liquidity_status": "ROTASYON",
-                "volume_ratio": (volume / avg_volume * 100) if avg_volume else None,
+                "volume_ratio": round(vol_ratio, 1),
                 "is_critical": False,
                 "is_rotation": True,
+                "is_thin_market": False,
                 "alert_message": rotation_msg,
             }
             continue
 
+        # ----- KURAL 4: Sığ Piyasa Uyarısı (fiyat yönünden bağımsız) -----
+        is_thin, thin_msg = check_thin_market(
+            ticker, weight, volume, avg_volume
+        )
+
+        if is_thin:
+            thin_market_alerts.append(f"{ticker} ({data['name']}): {thin_msg}")
+
         # ----- KURAL 1: Likidite Kilitlenmesi -----
-        is_critical, liq_msg, vol_ratio = check_liquidity_lockdown(
+        is_critical, liq_msg, _ = check_liquidity_lockdown(
             ticker, weight, change_pct, volume, avg_volume
         )
 
@@ -244,13 +302,22 @@ def analyze_portfolio(
             alert = f"{ticker} ({data['name']}): {liq_msg}"
             critical_alerts.append(alert)
 
+        # Durum mesajını belirle (kritik > sığ piyasa > normal)
+        if is_critical:
+            status_msg = liq_msg
+        elif is_thin:
+            status_msg = thin_msg
+        else:
+            status_msg = "Normal"
+
         per_stock[ticker] = {
             **data,
-            "liquidity_status": liq_msg,
+            "liquidity_status": status_msg,
             "volume_ratio": round(vol_ratio, 1),
             "is_critical": is_critical,
             "is_rotation": False,
-            "alert_message": liq_msg if is_critical else None,
+            "is_thin_market": is_thin,
+            "alert_message": liq_msg if is_critical else (thin_msg if is_thin else None),
         }
 
     # ----- KURAL 3: Sistemik Çöküş -----
@@ -271,4 +338,5 @@ def analyze_portfolio(
         "systemic": systemic_result,
         "critical_alerts": critical_alerts,
         "rotation_logs": rotation_logs,
+        "thin_market_alerts": thin_market_alerts,
     }

@@ -71,12 +71,14 @@ def _color_change(change_pct: Optional[float]) -> str:
     return txt
 
 
-def _color_status(status: str, is_critical: bool, is_rotation: bool) -> str:
+def _color_status(status: str, is_critical: bool, is_rotation: bool, is_thin_market: bool = False) -> str:
     """Likidite durumunu renklendir."""
     if is_critical:
         return C_RED + "KRİTİK ⚠️" + C_RESET
     elif is_rotation:
         return C_CYAN + "ROTASYON ↩" + C_RESET
+    elif is_thin_market:
+        return C_YELLOW + "SIĞ PİYASA ⚠️" + C_RESET
     elif status == "VERİ YOK":
         return C_YELLOW + "VERİ YOK" + C_RESET
     else:
@@ -132,6 +134,7 @@ def print_risk_table(per_stock: Dict[str, Dict[str, Any]]) -> None:
 
         is_critical = data.get("is_critical", False)
         is_rotation = data.get("is_rotation", False)
+        is_thin = data.get("is_thin_market", False)
         liq_status = data.get("liquidity_status", "Normal")
 
         # Satır rengi
@@ -139,12 +142,14 @@ def print_risk_table(per_stock: Dict[str, Dict[str, Any]]) -> None:
             row_color = C_RED
         elif is_rotation:
             row_color = C_CYAN
+        elif is_thin:
+            row_color = C_YELLOW
         elif change_pct is not None and change_pct < 0:
             row_color = Fore.YELLOW
         else:
             row_color = ""
 
-        status_display = _color_status(liq_status, is_critical, is_rotation)
+        status_display = _color_status(liq_status, is_critical, is_rotation, data.get("is_thin_market", False))
 
         rows.append([
             row_color + short_ticker + C_RESET,
@@ -240,12 +245,12 @@ def print_simulation(sim: Dict[str, Any]) -> None:
 # Kritik Uyarılar
 # ---------------------------------------------------------------------------
 
-def print_critical_alerts(critical_alerts: List[str], rotation_logs: List[str]) -> None:
-    """Kritik uyarıları ve rotasyon loglarını yazdır."""
+def print_critical_alerts(critical_alerts: List[str], rotation_logs: List[str], thin_market_alerts: List[str] = None) -> None:
+    """Kritik uyarıları, rotasyon loglarını ve sığ piyasa uyarılarını yazdır."""
     print()
     print(C_WHITE + "[ UYARILAR & LOGLAR ]" + C_RESET)
 
-    if not critical_alerts and not rotation_logs:
+    if not critical_alerts and not rotation_logs and not thin_market_alerts:
         print(C_GREEN + "  ✓  Bugün için kritik uyarı yok." + C_RESET)
         return
 
@@ -253,6 +258,12 @@ def print_critical_alerts(critical_alerts: List[str], rotation_logs: List[str]) 
         print(C_RED + "  KRİTİK UYARILAR:" + C_RESET)
         for alert in critical_alerts:
             print(C_RED + f"  ⚠️   {alert}" + C_RESET)
+
+    if thin_market_alerts:
+        print()
+        print(C_YELLOW + "  SIĞ PİYASA UYARILARI:" + C_RESET)
+        for alert in thin_market_alerts:
+            print(C_YELLOW + f"  ⚠️   {alert}" + C_RESET)
 
     if rotation_logs:
         print()

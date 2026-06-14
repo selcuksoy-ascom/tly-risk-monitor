@@ -127,7 +127,7 @@ def main() -> None:
     print_risk_table(analysis["per_stock"])
     print_systemic_risk(analysis["systemic"])
     print_simulation(sim_result)
-    print_critical_alerts(analysis["critical_alerts"], analysis["rotation_logs"])
+    print_critical_alerts(analysis["critical_alerts"], analysis["rotation_logs"], analysis["thin_market_alerts"])
     print_footer()
 
     # ----- ADIM 8: Özet çıkış kodu -----
