@@ -251,6 +251,21 @@ def analyze_portfolio(
                 "is_critical": False,
                 "is_rotation": False,
                 "is_thin_market": False,
+                "is_fund": False,
+                "alert_message": None,
+            }
+            continue
+
+        # Fon/GYF tipi varlıklar — likidite analizi yapılmaz
+        if data.get("is_fund"):
+            per_stock[ticker] = {
+                **data,
+                "liquidity_status": "FON - İzleme Dışı",
+                "volume_ratio": None,
+                "is_critical": False,
+                "is_rotation": False,
+                "is_thin_market": False,
+                "is_fund": True,
                 "alert_message": None,
             }
             continue

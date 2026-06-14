@@ -71,7 +71,7 @@ def _color_change(change_pct: Optional[float]) -> str:
     return txt
 
 
-def _color_status(status: str, is_critical: bool, is_rotation: bool, is_thin_market: bool = False) -> str:
+def _color_status(status: str, is_critical: bool, is_rotation: bool, is_thin_market: bool = False, is_fund: bool = False) -> str:
     """Likidite durumunu renklendir."""
     if is_critical:
         return C_RED + "KRİTİK ⚠️" + C_RESET
@@ -79,6 +79,8 @@ def _color_status(status: str, is_critical: bool, is_rotation: bool, is_thin_mar
         return C_CYAN + "ROTASYON ↩" + C_RESET
     elif is_thin_market:
         return C_YELLOW + "SIĞ PİYASA ⚠️" + C_RESET
+    elif is_fund:
+        return C_CYAN + "FON - İzleme Dışı" + C_RESET
     elif status == "VERİ YOK":
         return C_YELLOW + "VERİ YOK" + C_RESET
     else:
@@ -123,19 +125,20 @@ def print_risk_table(per_stock: Dict[str, Dict[str, Any]]) -> None:
         name = data.get("name", "?")[:18]
         weight = f"%{data['weight']:.2f}"
 
-        price = data.get("price")
-        price_str = f"{price:.4f}" if price is not None else "N/A"
-
-        change_pct = data.get("change_pct")
-        change_str = _fmt_pct(change_pct, sign=True) if change_pct is not None else "N/A"
-
-        vol_ratio = data.get("volume_ratio")
-        vol_str = f"%{vol_ratio:.0f}" if vol_ratio is not None else "N/A"
-
+        is_fund = data.get("is_fund", False)
         is_critical = data.get("is_critical", False)
         is_rotation = data.get("is_rotation", False)
         is_thin = data.get("is_thin_market", False)
         liq_status = data.get("liquidity_status", "Normal")
+
+        price = data.get("price")
+        price_str = f"{price:.4f}" if price is not None else ("---" if is_fund else "N/A")
+
+        change_pct = data.get("change_pct")
+        change_str = _fmt_pct(change_pct, sign=True) if change_pct is not None else ("---" if is_fund else "N/A")
+
+        vol_ratio = data.get("volume_ratio")
+        vol_str = f"%{vol_ratio:.0f}" if vol_ratio is not None else ("---" if is_fund else "N/A")
 
         # Satır rengi
         if is_critical:
@@ -144,12 +147,14 @@ def print_risk_table(per_stock: Dict[str, Dict[str, Any]]) -> None:
             row_color = C_CYAN
         elif is_thin:
             row_color = C_YELLOW
+        elif is_fund:
+            row_color = C_CYAN
         elif change_pct is not None and change_pct < 0:
             row_color = Fore.YELLOW
         else:
             row_color = ""
 
-        status_display = _color_status(liq_status, is_critical, is_rotation, data.get("is_thin_market", False))
+        status_display = _color_status(liq_status, is_critical, is_rotation, data.get("is_thin_market", False), is_fund)
 
         rows.append([
             row_color + short_ticker + C_RESET,

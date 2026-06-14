@@ -45,7 +45,7 @@ PORTFOLIO = {
     "TPKGY.IS": {
         "name": "HAS Portföy GYF",
         "weight": 12.84,
-        "category": "other",
+        "category": "fund",
         "prev_weight": 12.84,
     },
 }

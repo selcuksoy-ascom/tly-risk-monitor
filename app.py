@@ -173,10 +173,11 @@ for ticker, data in analysis["per_stock"].items():
     is_critical = data.get("is_critical", False)
     is_rotation = data.get("is_rotation", False)
     is_thin = data.get("is_thin_market", False)
+    is_fund = data.get("is_fund", False)
 
-    price_str = f"{price:,.4f}" if price is not None else "—"
-    change_str = f"{change_pct:+.2f}%" if change_pct is not None else "—"
-    vol_str = f"%{vol_ratio:.0f}" if vol_ratio is not None else "—"
+    price_str = f"{price:,.4f}" if price is not None else ("---" if is_fund else "—")
+    change_str = f"{change_pct:+.2f}%" if change_pct is not None else ("---" if is_fund else "—")
+    vol_str = f"%{vol_ratio:.0f}" if vol_ratio is not None else ("---" if is_fund else "—")
 
     # Durum emojisi
     if is_critical:
@@ -185,6 +186,8 @@ for ticker, data in analysis["per_stock"].items():
         status_icon = "🔵"
     elif is_thin:
         status_icon = "🟡"
+    elif is_fund:
+        status_icon = "🔷"
     elif data.get("error"):
         status_icon = "⚫"
     else:
@@ -201,6 +204,7 @@ for ticker, data in analysis["per_stock"].items():
         "_critical": is_critical,
         "_rotation": is_rotation,
         "_thin": is_thin,
+        "_fund": is_fund,
         "_change": change_pct or 0,
         "_error": data.get("error", False),
     })
@@ -219,6 +223,8 @@ def highlight_rows(row):
         color = "background-color: #e8f5e9"
     elif row["_thin"]:
         color = "background-color: #fef7e0"
+    elif row["_fund"]:
+        color = "background-color: #e3f2fd"
     elif row["_error"]:
         color = "background-color: #f1f3f4"
     elif row["_change"] < 0:
