@@ -27,37 +27,60 @@ def fetch_stock_data(ticker: str) -> Optional[Dict[str, Any]]:
     try:
         stock = yf.Ticker(ticker)
 
-        # Bugün ve dün için veri çek (en az 2 gün gerekli)
-        end = datetime.now()
-        start = end - timedelta(days=5)  # Hafta sonu/tatil için 5 gün buffer
+        # Anlık fiyat: fast_info üzerinden son işlem fiyatı
+        try:
+            live_price = stock.fast_info.get("lastPrice")
+        except Exception:
+            live_price = None
 
-        hist = stock.history(start=start.strftime("%Y-%m-%d"),
-                             end=end.strftime("%Y-%m-%d"),
-                             auto_adjust=True)
+        # Önceki kapanış (değişim hesaplamak için)
+        try:
+            prev_close = stock.fast_info.get("regularMarketPreviousClose")
+        except Exception:
+            prev_close = None
 
-        if hist.empty or len(hist) < 1:
-            print(f"  [UYARI] {ticker}: Güncel veri bulunamadı.")
+        # Hacim ve open (yedek)
+        try:
+            live_volume = stock.fast_info.get("lastVolume")
+            today_open = stock.fast_info.get("open")
+        except Exception:
+            live_volume = None
+            today_open = None
+
+        # fast_info'dan veri alınamadıysa history'ye düş
+        if live_price is None:
+            end = datetime.now()
+            start = end - timedelta(days=5)
+            hist = stock.history(start=start.strftime("%Y-%m-%d"),
+                                 end=end.strftime("%Y-%m-%d"),
+                                 auto_adjust=True)
+
+            if hist.empty or len(hist) < 1:
+                print(f"  [UYARI] {ticker}: Güncel veri bulunamadı.")
+                return None
+
+            last_row = hist.iloc[-1]
+            live_price = float(last_row["Close"])
+            live_volume = int(last_row["Volume"])
+
+            if prev_close is None and len(hist) >= 2:
+                prev_close = float(hist.iloc[-2]["Close"])
+
+        # live_price None ise çık
+        if live_price is None:
+            print(f"  [UYARI] {ticker}: Fiyat verisi alınamadı.")
             return None
 
-        # Son kapanış
-        last_row = hist.iloc[-1]
-        current_price = float(last_row["Close"])
-        current_volume = int(last_row["Volume"])
+        current_price = float(live_price)
+        current_volume = int(live_volume) if live_volume else 0
 
         # Günlük değişim %
-        if len(hist) >= 2:
-            prev_close = float(hist.iloc[-2]["Close"])
-            if prev_close > 0:
-                change_pct = ((current_price - prev_close) / prev_close) * 100.0
-            else:
-                change_pct = 0.0
+        if prev_close and prev_close > 0:
+            change_pct = ((current_price - prev_close) / prev_close) * 100.0
+        elif today_open and today_open > 0:
+            change_pct = ((current_price - today_open) / today_open) * 100.0
         else:
-            # Sadece bir gün verisi varsa open/close farkından hesapla
-            open_price = float(last_row["Open"])
-            if open_price > 0:
-                change_pct = ((current_price - open_price) / open_price) * 100.0
-            else:
-                change_pct = 0.0
+            change_pct = 0.0
 
         return {
             "ticker": ticker,
