@@ -19,6 +19,7 @@ from config import (
 from data_fetcher import fetch_all_portfolio_data
 from risk_analyzer import analyze_portfolio
 from simulator import run_simulation
+from tefas_fetcher import analyze_fund_health
 
 # ---------------------------------------------------------------------------
 # Sayfa yapılandırması
@@ -326,6 +327,63 @@ else:
         st.warning(f"🟡 {alert}")
     for log in rotation_logs:
         st.info(f"🔵 {log}")
+
+# ---------------------------------------------------------------------------
+# Fon Sağlığı (TEFAS)
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.markdown("### 🏥 Fon Sağlığı (TEFAS)")
+
+fund_health = analyze_fund_health()
+
+if fund_health is None:
+    st.caption("TEFAS verisi şu anda çekilemiyor.")
+else:
+    nav = fund_health.get("nav")
+    nav_change = fund_health.get("nav_change")
+    aum = fund_health.get("aum")
+    aum_change_7d = fund_health.get("aum_change_7d")
+    inv = fund_health.get("investor_count")
+    inv_change_7d = fund_health.get("investor_change_7d")
+    trend = fund_health.get("trend", "flat")
+
+    fc1, fc2, fc3 = st.columns(3)
+
+    with fc1:
+        if nav is not None:
+            delta_str = f"{nav_change:+.2f}%" if nav_change is not None else None
+            st.metric("NAV Fiyatı", f"{nav:,.4f} ₺", delta=delta_str)
+        else:
+            st.metric("NAV Fiyatı", "Veri yok")
+
+    with fc2:
+        if aum is not None:
+            aum_display = f"{aum/1e9:.1f} milyar ₺"
+            delta_str = f"{aum_change_7d:+.1f}% haftalık" if aum_change_7d is not None else None
+            st.metric("Fon Büyüklüğü", aum_display, delta=delta_str,
+                      delta_color="normal" if (aum_change_7d is None or aum_change_7d >= 0) else "inverse")
+        else:
+            st.metric("Fon Büyüklüğü", "Veri yok")
+
+    with fc3:
+        if inv is not None:
+            inv_display = f"{inv:,}"
+            delta_str = f"{inv_change_7d:+.0f} haftalık" if inv_change_7d is not None else None
+            st.metric("Yatırımcı Sayısı", inv_display, delta=delta_str,
+                      delta_color="normal" if (inv_change_7d is None or inv_change_7d >= 0) else "inverse")
+        else:
+            st.metric("Yatırımcı Sayısı", "Veri yok")
+
+    # Trend satırı
+    trend_icon = {"up": "↗ Büyüyor", "down": "↘ Daralıyor", "flat": "→ Yatay"}
+    st.caption(f"**30G Trend:** {trend_icon.get(trend, trend)}")
+
+    # Uyarılar
+    for w in fund_health.get("warnings", []):
+        if "KRİTİK" in w:
+            st.error(w)
+        else:
+            st.warning(w)
 
 # ---------------------------------------------------------------------------
 # Alt bilgi

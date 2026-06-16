@@ -113,12 +113,17 @@ def main() -> None:
         panic_rate=PANIC_RATE,
     )
 
-    # ----- ADIM 7: Raporu yazdır -----
+    # ----- ADIM 7: TEFAS fon sağlığı -----
+    from tefas_fetcher import analyze_fund_health
+    fund_health = analyze_fund_health()
+
+    # ----- ADIM 8: Raporu yazdır -----
     from reporter import (
         print_header,
         print_risk_table,
         print_systemic_risk,
         print_simulation,
+        print_fund_health,
         print_critical_alerts,
         print_footer,
     )
@@ -126,11 +131,12 @@ def main() -> None:
     print_header(report_date=date.today())
     print_risk_table(analysis["per_stock"])
     print_systemic_risk(analysis["systemic"])
+    print_fund_health(fund_health)
     print_simulation(sim_result)
     print_critical_alerts(analysis["critical_alerts"], analysis["rotation_logs"], analysis["thin_market_alerts"])
     print_footer()
 
-    # ----- ADIM 8: Özet çıkış kodu -----
+    # ----- ADIM 9: Özet çıkış kodu -----
     if analysis["critical_alerts"]:
         sys.exit(1)  # CI/monitoring için non-zero exit
 

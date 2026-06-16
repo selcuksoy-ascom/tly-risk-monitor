@@ -247,6 +247,81 @@ def print_simulation(sim: Dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Fon Sağlığı (TEFAS)
+# ---------------------------------------------------------------------------
+
+def _fmt_tl_short(value: float) -> str:
+    """TL değerini kısa formatta yaz (milyar/milyon)."""
+    if value is None:
+        return "N/A"
+    abs_val = abs(value)
+    if abs_val >= 1_000_000_000:
+        return f"{value/1_000_000_000:.1f} milyar TL"
+    elif abs_val >= 1_000_000:
+        return f"{value/1_000_000:.1f} milyon TL"
+    else:
+        return f"{value:,.0f} TL"
+
+
+def _fmt_trend(trend: str) -> str:
+    """Trend yönünü sembolleştir."""
+    if trend == "up":
+        return C_GREEN + "/\\ Buyuyor" + C_RESET
+    elif trend == "down":
+        return C_RED + "\\/ Daraliyor" + C_RESET
+    else:
+        return C_YELLOW + "-- Yatay" + C_RESET
+
+
+def print_fund_health(health: Optional[Dict[str, Any]]) -> None:
+    """TEFAS fon sağlığı bölümünü yazdır. Veri yoksa sessizce atlar."""
+    if health is None:
+        return
+
+    print()
+    print(C_WHITE + "[ FON SAĞLIĞI ]" + C_RESET)
+
+    nav = health.get("nav")
+    nav_change = health.get("nav_change")
+    aum = health.get("aum")
+    aum_change_7d = health.get("aum_change_7d")
+    inv = health.get("investor_count")
+    inv_change_7d = health.get("investor_change_7d")
+    trend = health.get("trend", "flat")
+
+    nav_str = f"{nav:,.4f} TL" if nav is not None else "N/A"
+    if nav_change is not None:
+        sign = "+" if nav_change > 0 else ""
+        nav_str += f"  ({sign}{nav_change:.2f}%)"
+
+    aum_str = _fmt_tl_short(aum) if aum is not None else "N/A"
+    if aum_change_7d is not None:
+        sign = "+" if aum_change_7d > 0 else ""
+        aum_str += f"  ({sign}{aum_change_7d:.1f}% haftalık)"
+
+    inv_str = f"{inv:,}" if inv is not None else "N/A"
+    if inv_change_7d is not None:
+        sign = "+" if inv_change_7d > 0 else ""
+        inv_str += f"  ({sign}{inv_change_7d:.0f} haftalık)"
+
+    trend_str = _fmt_trend(trend)
+
+    print(f"  {'NAV Fiyatı':<20}: {nav_str}")
+    print(f"  {'Fon Büyüklüğü':<20}: {aum_str}")
+    print(f"  {'Yatırımcı Sayısı':<20}: {inv_str}")
+    print(f"  {'30G Trend':<20}: {trend_str}")
+
+    warnings = health.get("warnings", [])
+    if warnings:
+        print()
+        for w in warnings:
+            if "KRİTİK" in w:
+                print(C_RED + f"  {w}" + C_RESET)
+            else:
+                print(C_YELLOW + f"  {w}" + C_RESET)
+
+
+# ---------------------------------------------------------------------------
 # Kritik Uyarılar
 # ---------------------------------------------------------------------------
 
