@@ -42,12 +42,6 @@ PORTFOLIO = {
         "category": "group",
         "prev_weight": 5.50,
     },
-    "TPKGY.IS": {
-        "name": "HAS Portföy GYF",
-        "weight": 12.84,
-        "category": "fund",
-        "prev_weight": 12.84,
-    },
 }
 
 # Fonun toplam hisse oranı (%), geri kalan nakit/tahvil gibi sabit varlıklardır
