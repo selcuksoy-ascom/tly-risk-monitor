@@ -13,7 +13,7 @@ import pandas as pd
 
 FUND_CODE = "TLY"
 FUND_KIND = "YAT"
-HISTORY_DAYS = 30
+HISTORY_DAYS = 50
 
 # Uyarı eşikleri
 INVESTOR_DROP_THRESHOLD = -5.0    # 7 günde %5 düşüş
@@ -91,20 +91,27 @@ def analyze_fund_health() -> Optional[Dict[str, Any]]:
         aum_col = "portfolio_size"
         inv_col = "investor_count"
 
-        latest = df.iloc[-1]
-        nav = float(latest[price_col]) if pd.notna(latest[price_col]) else None
-        aum = float(latest[aum_col]) if pd.notna(latest[aum_col]) else None
-        inv = int(latest[inv_col]) if pd.notna(latest[inv_col]) else None
-
-        if nav is None and aum is None and inv is None:
+        # TEFAS bugünün verisini henüz yayınlamamışsa price=0 gelir.
+        # Fiyat bazlı hesaplamalar için sadece price > 0 olan satırları kullan.
+        valid_df = df[df[price_col] > 0].copy()
+        if valid_df.empty:
             return None
 
-        # Günlük NAV değişimi
-        nav_series = df[price_col]
+        # NAV ve AUM: son geçerli gün
+        latest_valid = valid_df.iloc[-1]
+        nav = float(latest_valid[price_col])
+        aum = float(latest_valid[aum_col])
+
+        # Yatırımcı sayısı: en güncel satırdan (bugün 0-price olsa bile gelir)
+        latest = df.iloc[-1]
+        inv = int(latest[inv_col]) if pd.notna(latest[inv_col]) else None
+
+        # Günlük NAV değişimi (geçerli fiyat serisinden)
+        nav_series = valid_df[price_col]
         nav_change = None
-        if len(nav_series.dropna()) >= 2:
-            n0 = nav_series.dropna().iloc[-1]
-            n1 = nav_series.dropna().iloc[-2]
+        if len(nav_series) >= 2:
+            n0 = nav_series.iloc[-1]
+            n1 = nav_series.iloc[-2]
             if n1 != 0:
                 nav_change = round(((n0 - n1) / n1) * 100.0, 2)
 
@@ -116,20 +123,20 @@ def analyze_fund_health() -> Optional[Dict[str, Any]]:
         if inv_change_7d is not None and inv_change_7d < INVESTOR_DROP_THRESHOLD:
             warnings.append(f"⚠️ FONDAN ÇIKIŞ UYARISI: Yatırımcı sayısı 7 günde %{inv_change_7d:.1f} düştü")
 
-        # AUM - 7 günde %10'dan fazla düşüş
-        aum_change_7d = _pct_change(df[aum_col], 7)
+        # AUM - 7 günde %10'dan fazla düşüş (geçerli seriden)
+        aum_change_7d = _pct_change(valid_df[aum_col], 7)
         if aum_change_7d is not None and aum_change_7d < AUM_DROP_THRESHOLD:
             warnings.append(f"🚨 KRİTİK: FON BÜYÜKLÜĞÜ ERİYOR — 7 günde %{aum_change_7d:.1f} düştü")
 
         # NAV - son 5 günde art arda düşüş
-        if _consecutive_down(df[price_col], NAV_CONSECUTIVE_DAYS):
+        if _consecutive_down(valid_df[price_col], NAV_CONSECUTIVE_DAYS):
             warnings.append("⚠️ FON DEĞER KAYBEDİYOR: NAV son 5 günde art arda düştü")
 
         # 30G Trend: son 5 günlük ortalama vs önceki 5
         trend = "flat"
-        if len(df) >= 30:
-            recent_5 = df[price_col].dropna().iloc[-5:].mean()
-            prev_5 = df[price_col].dropna().iloc[-10:-5].mean()
+        if len(valid_df) >= 30:
+            recent_5 = valid_df[price_col].iloc[-5:].mean()
+            prev_5 = valid_df[price_col].iloc[-10:-5].mean()
             if prev_5 > 0:
                 diff = (recent_5 - prev_5) / prev_5
                 if diff > 0.002:
