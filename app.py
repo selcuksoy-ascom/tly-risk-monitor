@@ -20,6 +20,7 @@ from data_fetcher import fetch_all_portfolio_data
 from risk_analyzer import analyze_portfolio
 from simulator import run_simulation
 from tefas_fetcher import analyze_fund_health
+from stress_test import analyze_stress_test
 
 # ---------------------------------------------------------------------------
 # Sayfa yapılandırması
@@ -384,6 +385,97 @@ else:
             st.error(w)
         else:
             st.warning(w)
+
+# ---------------------------------------------------------------------------
+# Stres Testi & Fon Sağlığı
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.markdown("### 🧪 Stres Testi & Fon Sağlığı")
+
+stress = analyze_stress_test()
+
+if stress is None:
+    st.caption("Stres testi verisi şu anda çekilemiyor (TEFAS veya Fonoloji erişilemez).")
+else:
+    nav = stress.get("nav")
+    nav_change = stress.get("nav_change")
+    aum = stress.get("aum")
+    aum_change_7d = stress.get("aum_change_7d")
+    inv = stress.get("investor_count")
+    inv_change_7d = stress.get("investor_change_7d")
+    repo_ratio = stress.get("repo_ratio")
+    cash_buffer = stress.get("cash_buffer")
+    coverable_exit = stress.get("coverable_exit")
+    nav_trend = stress.get("nav_trend", "flat")
+    stress_level = stress.get("stress_level", "low")
+    warnings = stress.get("warnings", [])
+
+    sc1, sc2, sc3 = st.columns(3)
+
+    with sc1:
+        if nav is not None:
+            delta_str = f"{nav_change:+.2f}% bugün" if nav_change is not None else None
+            st.metric("NAV Fiyatı", f"{nav:,.4f} ₺", delta=delta_str)
+        else:
+            st.metric("NAV Fiyatı", "Veri yok")
+
+    with sc2:
+        if aum is not None:
+            aum_display = f"{aum/1e9:.1f} milyar ₺"
+            delta_str = f"{aum_change_7d:+.1f}% haftalık" if aum_change_7d is not None else None
+            st.metric("Fon Büyüklüğü (AUM)", aum_display, delta=delta_str,
+                      delta_color="normal" if (aum_change_7d is None or aum_change_7d >= 0) else "inverse")
+        else:
+            st.metric("Fon Büyüklüğü (AUM)", "Veri yok")
+
+    with sc3:
+        if inv is not None:
+            inv_display = f"{inv:,}"
+            delta_str = f"{inv_change_7d:+.0f} haftalık" if inv_change_7d is not None else None
+            st.metric("Yatırımcı Sayısı", inv_display, delta=delta_str,
+                      delta_color="normal" if (inv_change_7d is None or inv_change_7d >= 0) else "inverse")
+        else:
+            st.metric("Yatırımcı Sayısı", "Veri yok")
+
+    # Nakit tamponu ve karşılanabilir çıkış
+    sc4, sc5 = st.columns(2)
+
+    with sc4:
+        if repo_ratio is not None:
+            cash_display = f"%{repo_ratio:.2f} ters repo"
+            if cash_buffer is not None:
+                cash_display += f"  (~{cash_buffer/1e9:.1f} milyar ₺)"
+            st.metric("Nakit Tamponu", cash_display)
+        else:
+            st.metric("Nakit Tamponu", "Fonoloji verisi yok")
+
+    with sc5:
+        if coverable_exit is not None:
+            st.metric("Karşılanabilir Çıkış", f"%{coverable_exit:.2f}",
+                      help="Yatırımcıların aynı anda çıkabileceği maksimum oran")
+        else:
+            st.metric("Karşılanabilir Çıkış", "N/A")
+
+    # NAV Trend
+    trend_icon = {"up": "↗ Yükseliyor", "down": "↘ Düşüyor", "flat": "→ Yatay"}
+    st.caption(f"**NAV Trend (5 gün):** {trend_icon.get(nav_trend, nav_trend)}")
+
+    # Stres Seviyesi
+    st.markdown("#### Stres Seviyesi")
+    if stress_level == "high":
+        st.error("🚨 YÜKSEK — Birden fazla risk göstergesi alarm veriyor")
+    elif stress_level == "medium":
+        st.warning("⚠️ ORTA — Bazı risk göstergeleri uyarı seviyesinde")
+    else:
+        st.success("✅ DÜŞÜK — Risk göstergeleri normal seviyede")
+
+    # Uyarılar
+    if warnings:
+        for w in warnings:
+            if "KRİTİK" in w or "SİSTEMİK" in w:
+                st.error(w)
+            else:
+                st.warning(w)
 
 # ---------------------------------------------------------------------------
 # Alt bilgi

@@ -117,13 +117,24 @@ def main() -> None:
     from tefas_fetcher import analyze_fund_health
     fund_health = analyze_fund_health()
 
-    # ----- ADIM 8: Raporu yazdır -----
+    # ----- ADIM 8: Stres Testi -----
+    from stress_test import analyze_stress_test
+    stress_result = analyze_stress_test()
+
+    # Stres testinden gelen kritik uyarilari ana uyarilara ekle
+    if stress_result:
+        for w in stress_result.get("warnings", []):
+            if "KRITIK" in w or "SISTEMIK" in w:
+                analysis["critical_alerts"].append(w)
+
+    # ----- ADIM 9: Raporu yazdır -----
     from reporter import (
         print_header,
         print_risk_table,
         print_systemic_risk,
         print_simulation,
         print_fund_health,
+        print_stress_test,
         print_critical_alerts,
         print_footer,
     )
@@ -132,11 +143,12 @@ def main() -> None:
     print_risk_table(analysis["per_stock"])
     print_systemic_risk(analysis["systemic"])
     print_fund_health(fund_health)
+    print_stress_test(stress_result)
     print_simulation(sim_result)
     print_critical_alerts(analysis["critical_alerts"], analysis["rotation_logs"], analysis["thin_market_alerts"])
     print_footer()
 
-    # ----- ADIM 9: Özet çıkış kodu -----
+    # ----- ADIM 10: Özet çıkış kodu -----
     if analysis["critical_alerts"]:
         sys.exit(1)  # CI/monitoring için non-zero exit
 
