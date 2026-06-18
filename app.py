@@ -7,11 +7,13 @@
 
 import sys
 import os
+from io import BytesIO
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
-from datetime import date, datetime
+import pandas as pd
+from datetime import date, datetime, timedelta
 from config import (
     PORTFOLIO, EQUITY_RATIO, DEFAULT_CAPITAL, PANIC_RATE,
     GROUP_TICKERS, CORRELATION_THRESHOLD,
@@ -21,6 +23,12 @@ from risk_analyzer import analyze_portfolio
 from simulator import run_simulation
 from tefas_fetcher import analyze_fund_health
 from stress_test import analyze_stress_test
+from money_flow import (
+    fetch_full_history, analyze_money_flow,
+    export_to_excel, current_month_highlight,
+)
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # ---------------------------------------------------------------------------
 # Sayfa yapılandırması
@@ -61,6 +69,12 @@ def fetch_data_cached():
     return fetch_all_portfolio_data(PORTFOLIO)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_tefas_full_history():
+    """TLY fonunun tum gecmis TEFAS verisini ceker, 1 saat cache'ler."""
+    return fetch_full_history()
+
+
 # ---------------------------------------------------------------------------
 # Sidebar — Parametreler
 # ---------------------------------------------------------------------------
@@ -93,6 +107,45 @@ with st.sidebar:
         value=PANIC_RATE,
         step=0.5,
         help="T+2 valör simülasyonunda günlük kayıp oranı",
+    )
+
+    st.markdown("---")
+
+    st.markdown("### 📅 Para Akışı Analiz Dönemi")
+    mf_period = st.radio(
+        "Dönem seçin",
+        ["Son 60 gün", "6 Ay", "1 Yıl", "3 Yıl", "Tümü", "Özel tarih"],
+        index=0,
+        horizontal=False,
+    )
+
+    today = date.today()
+    if mf_period == "Son 60 gün":
+        mf_start = today - timedelta(days=60)
+        mf_end = today
+    elif mf_period == "6 Ay":
+        mf_start = today - timedelta(days=180)
+        mf_end = today
+    elif mf_period == "1 Yıl":
+        mf_start = today - timedelta(days=365)
+        mf_end = today
+    elif mf_period == "3 Yıl":
+        mf_start = today - timedelta(days=3 * 365)
+        mf_end = today
+    elif mf_period == "Tümü":
+        mf_start = None
+        mf_end = None
+    else:
+        c1, c2 = st.columns(2)
+        with c1:
+            mf_start = st.date_input("Başlangıç", today - timedelta(days=60))
+        with c2:
+            mf_end = st.date_input("Bitiş", today)
+
+    show_seasonal_ref = st.toggle(
+        "Mevsimsel Referans Çizgileri",
+        value=True,
+        help="Grafiklerde her ayın tarihsel ortalamasını referans çizgisi olarak göster",
     )
 
     st.markdown("---")
@@ -476,6 +529,381 @@ else:
                 st.error(w)
             else:
                 st.warning(w)
+
+# ---------------------------------------------------------------------------
+# Gelişmiş Para Akışı Analizi
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.markdown("### 💰 Gelişmiş Para Akışı Analizi")
+
+tefas_full = fetch_tefas_full_history()
+
+if tefas_full is None or tefas_full.empty:
+    st.warning("TEFAS geçmiş verisi şu anda çekilemiyor.")
+else:
+    with st.spinner("📡 Geçmiş veriler yükleniyor... (ilk açılışta 30-60 saniye sürebilir)"):
+        mf = analyze_money_flow(tefas_full, period_start=mf_start, period_end=mf_end)
+
+    if mf is None:
+        st.warning("Para akışı analizi hesaplanamadı.")
+    else:
+        monthly = mf["monthly_selected"]
+        comp = mf["comparison"]
+        lt = mf["long_term"]
+        seasonal_cal = mf["seasonal_calendar"]
+        momentum_df = mf["momentum_selected"]
+
+        # =====================================================================
+        # 4-METRİK ÖZET DASHBOARD
+        # =====================================================================
+        st.markdown("#### 📊 Özet Dashboard")
+
+        # Bu ay akış
+        if not monthly.empty:
+            last = monthly.iloc[-1]
+            curr_flow = float(last["total_net_flow"])
+        else:
+            curr_flow = 0.0
+
+        # Ivme durumu
+        if not momentum_df.empty and not momentum_df["momentum"].dropna().empty:
+            last_mom = float(momentum_df["momentum"].dropna().iloc[-1])
+            if last_mom > 0:
+                mom_status = "✅ Yükseliyor"
+            elif last_mom < 0:
+                mom_status = "⚠️ Düşüyor"
+            else:
+                mom_status = "➖ Yatay"
+        else:
+            mom_status = "N/A"
+
+        # Uzun vade ort
+        all_time_avg = lt.get("all_time_avg", 0)
+
+        # Mevsimsel uyum
+        seasonal_match = "N/A"
+        if not monthly.empty and seasonal_cal:
+            today_m = date.today().month
+            curr_month = monthly[monthly["year_month"].apply(lambda x: x.month == today_m)]
+            entry = next((e for e in seasonal_cal if e["month_num"] == today_m), None)
+            if not curr_month.empty and entry and entry["avg_flow"] != 0:
+                cf = float(curr_month.iloc[-1]["total_net_flow"])
+                ha = entry["avg_flow"]
+                if (cf >= 0 and ha >= 0) or (cf <= 0 and ha <= 0):
+                    seasonal_match = "✅ Normal"
+                else:
+                    seasonal_match = "⚠️ Aykırı"
+
+        d1, d2, d3, d4 = st.columns(4)
+        with d1:
+            st.metric("Bu Ay Akış", f"{curr_flow/1e9:+.1f} milyar ₺")
+        with d2:
+            st.metric("İvme Durumu", mom_status)
+        with d3:
+            st.metric("Uzun Vade Ort", f"{all_time_avg/1e9:+.1f} milyar ₺/ay")
+        with d4:
+            st.metric("Mevsimsel Uyum", seasonal_match)
+
+        # =====================================================================
+        # AKILLI YORUM
+        # =====================================================================
+        commentary = mf.get("commentary", "")
+        if commentary:
+            st.info(f"💬 {commentary}")
+
+        # =====================================================================
+        # MEVCUT AY VURGUSU
+        # =====================================================================
+        curr_highlight = current_month_highlight(seasonal_cal, monthly)
+        if curr_highlight:
+            with st.expander("📅 Mevcut Ay — Tarihsel Karşılaştırma", expanded=True):
+                st.markdown(curr_highlight)
+
+        # =====================================================================
+        # EXPORT BUTONU
+        # =====================================================================
+        export_buffer = export_to_excel(monthly, seasonal_cal, momentum_df)
+        st.download_button(
+            label="📥 Raporu İndir (Excel)",
+            data=export_buffer,
+            file_name=f"TLY_Para_Akisi_{date.today().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        # =====================================================================
+        # KARŞILAŞTIRMA KARTI
+        # =====================================================================
+        if comp and lt:
+            st.markdown("#### 📊 Uzun Vade Karşılaştırması")
+            k1, k2, k3, k4 = st.columns(4)
+            with k1:
+                st.metric(
+                    "Seçili Dönem Ortalaması",
+                    f"{comp['period_avg']/1e9:+.2f} milyar ₺/ay",
+                )
+            with k2:
+                st.metric(
+                    "Uzun Vade Ortalaması",
+                    f"{comp['all_time_avg']/1e9:+.2f} milyar ₺/ay",
+                )
+            with k3:
+                pct = comp.get("pct_diff")
+                st.metric("Fark",
+                          f"{pct:+.1f}%" if pct is not None else "N/A")
+            with k4:
+                zs = comp.get("z_score")
+                st.metric("Z-Score", f"{zs:.2f}" if zs is not None else "N/A")
+            st.info(f"**Değerlendirme:** {comp['assessment']}")
+
+            with st.expander("📈 Uzun Vade İstatistikler"):
+                s1, s2, s3 = st.columns(3)
+                with s1:
+                    mi = lt.get("max_inflow")
+                    st.metric(
+                        "En Yüksek Aylık Giriş",
+                        f"{mi/1e9:+.2f} milyar ₺" if mi is not None else "-",
+                    )
+                    st.caption(str(lt.get("max_inflow_month", "")))
+                with s2:
+                    mo = lt.get("max_outflow")
+                    st.metric(
+                        "En Yüksek Aylık Çıkış",
+                        f"{mo/1e9:+.2f} milyar ₺" if mo is not None else "-",
+                    )
+                    st.caption(str(lt.get("max_outflow_month", "")))
+                with s3:
+                    st.metric(
+                        "Standart Sapma",
+                        f"{lt['all_time_std']/1e9:.2f} milyar ₺",
+                    )
+
+        # =====================================================================
+        # UYARILAR
+        # =====================================================================
+        if mf["warnings"]:
+            st.markdown("#### 🔔 Uyarılar")
+            for w in mf["warnings"]:
+                if "🚨" in w:
+                    st.error(w)
+                elif "⚠️" in w:
+                    st.warning(w)
+                else:
+                    st.info(w)
+
+        # =====================================================================
+        # MEVSİMSEL TAKVİM TABLOSU
+        # =====================================================================
+        if seasonal_cal:
+            st.markdown("#### 📅 Mevsimsel Takvim (Tarihsel)")
+
+            def _seasonal_assessment_local(entry):
+                if entry["total_years"] == 0:
+                    return "➖ Veri yok"
+                ratio = entry["positive_years"] / entry["total_years"]
+                if ratio >= 0.8:
+                    return "✅ Güçlü giriş ayı"
+                elif ratio >= 0.6:
+                    return "✅ Giriş ayı"
+                elif ratio <= 0.2:
+                    return "🚨 Tarihsel çıkış ayı"
+                elif ratio <= 0.4:
+                    return "⚠️ Çıkış eğilimli"
+                else:
+                    return "➖ Karışık"
+
+            cal_rows = []
+            for e in seasonal_cal:
+                avg_str = f"{e['avg_flow']/1e9:+.1f} milyar" if e["total_years"] > 0 else "-"
+                pos_str = f"{e['positive_years']}/{e['total_years']}" if e["total_years"] > 0 else "-"
+
+                cal_rows.append({
+                    "Ay": e["month_name"],
+                    "Tarihsel Ort": avg_str,
+                    "Pozitif Yıl": pos_str,
+                    "Değerlendirme": _seasonal_assessment_local(e),
+                    "En İyi Yıl": f"{e['best_year']}" if e.get("best_year") else "-",
+                    "En Kötü Yıl": f"{e['worst_year']}" if e.get("worst_year") else "-",
+                })
+
+            cal_df = pd.DataFrame(cal_rows)
+
+            # Mevcut ayı vurgulamak için df'e styling
+            today_m_idx = date.today().month - 1  # 0-indexed
+            def _row_style(row):
+                if row.name == today_m_idx:
+                    return ["background-color: #1a3a5c; font-weight: bold"] * len(row)
+                return [""] * len(row)
+
+            styled = cal_df.style.apply(_row_style, axis=1)
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+            st.caption("Mevcut ay mavi vurgulu satırdır.")
+
+        # =====================================================================
+        # GRAFİK 1: Aylık Bar Chart
+        # =====================================================================
+        if not monthly.empty:
+            st.markdown("#### 📊 Aylık Net Para Giriş/Çıkışı")
+            months = monthly["year_month_str"].tolist()
+            flows = (monthly["total_net_flow"] / 1e9).tolist()
+            ma = (monthly["flow_ma_12"] / 1e9).tolist()
+
+            bar_colors = ["#27ae60" if f >= 0 else "#e74c3c" for f in flows]
+            fig1 = go.Figure()
+            fig1.add_trace(go.Bar(
+                x=months, y=flows,
+                marker_color=bar_colors,
+                name="Net Akış",
+                hovertemplate="%{x}<br>Net Akış: %{y:+.2f} milyar ₺<extra></extra>",
+            ))
+            fig1.add_trace(go.Scatter(
+                x=months, y=ma,
+                mode="lines",
+                line=dict(color="#f39c12", width=2),
+                name="12 Aylık HA",
+            ))
+
+            # Mevsimsel referans çizgileri
+            if show_seasonal_ref and seasonal_cal:
+                for entry in seasonal_cal:
+                    mn = entry["month_name"]
+                    avg_flow_b = entry["avg_flow"] / 1e9
+                    if entry["total_years"] > 0:
+                        matching = [i for i, m in enumerate(months) if m.endswith(f"-{entry['month_num']:02d}")]
+                        if matching:
+                            fig1.add_trace(go.Scatter(
+                                x=[months[matching[0]], months[matching[-1]]],
+                                y=[avg_flow_b, avg_flow_b],
+                                mode="lines",
+                                line=dict(color="#8e44ad", dash="dot", width=1.3),
+                                name=f"{mn} ort.",
+                                showlegend=False,
+                                hovertemplate=f"{mn} tarihsel ort: %{{y:+.2f}} milyar<extra></extra>",
+                            ))
+
+            fig1.update_layout(
+                xaxis_title="Ay",
+                yaxis_title="milyar TL",
+                hovermode="x unified",
+                height=450,
+                margin=dict(l=20, r=20, t=10, b=20),
+            )
+            st.plotly_chart(fig1, use_container_width=True)
+
+        # =====================================================================
+        # GRAFİK 2: AUM ve Akış Karşılaştırması
+        # =====================================================================
+        if not monthly.empty:
+            st.markdown("#### 📈 AUM ve Net Akış Karşılaştırması")
+            fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+
+            fig2.add_trace(go.Scatter(
+                x=months,
+                y=(monthly["aum_end"] / 1e9).tolist(),
+                mode="lines+markers",
+                line=dict(color="#2980b9", width=2),
+                name="AUM",
+            ), secondary_y=False)
+
+            fig2.add_trace(go.Bar(
+                x=months, y=flows,
+                marker_color=bar_colors,
+                name="Net Akış",
+                opacity=0.5,
+            ), secondary_y=True)
+
+            fig2.update_layout(
+                height=450,
+                margin=dict(l=20, r=20, t=10, b=20),
+                hovermode="x unified",
+            )
+            fig2.update_yaxes(title_text="AUM (milyar ₺)", secondary_y=False)
+            fig2.update_yaxes(title_text="Net Akış (milyar ₺)", secondary_y=True)
+            st.plotly_chart(fig2, use_container_width=True)
+
+        # =====================================================================
+        # GRAFİK 3: Haftalık İvme
+        # =====================================================================
+        if not momentum_df.empty:
+            st.markdown("#### ⚡ Haftalık İvme")
+            mom_weeks = momentum_df["year_week"].tolist()
+            mom_vals = (momentum_df["momentum"] / 1e9).tolist()
+            mom_colors = [
+                "#27ae60" if v >= 0 else "#e74c3c" for v in mom_vals
+            ]
+
+            fig3 = go.Figure()
+            fig3.add_hline(
+                y=0, line_dash="dash", line_color="#95a5a6", opacity=0.5,
+            )
+            fig3.add_trace(go.Scatter(
+                x=mom_weeks, y=mom_vals,
+                mode="markers+lines",
+                marker=dict(color=mom_colors, size=7),
+                line=dict(color="#bdc3c7", width=0.8),
+                name="İvme",
+                hovertemplate="%{x}<br>İvme: %{y:+.3f} milyar ₺/gün<extra></extra>",
+            ))
+            fig3.update_layout(
+                xaxis_title="Hafta",
+                yaxis_title="İvme (milyar TL/gün)",
+                height=400,
+                margin=dict(l=20, r=20, t=10, b=20),
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+
+        # =====================================================================
+        # AYLIK AKIŞ TABLOSU
+        # =====================================================================
+        if not monthly.empty:
+            st.markdown("#### 📋 Aylık Akış Listesi")
+            table_df = monthly[[
+                "year_month_str", "total_net_flow",
+                "aum_change_pct", "investor_change",
+            ]].copy()
+            table_df.columns = [
+                "Ay", "Net Akış (TL)", "AUM Değişimi (%)", "Yatırımcı Değişimi",
+            ]
+
+            def _flow_label(v):
+                if pd.isna(v):
+                    return "-"
+                return f"{v/1e9:+.2f} milyar ₺"
+
+            def _pct_label(v):
+                if pd.isna(v):
+                    return "-"
+                return f"{v:+.2f}%"
+
+            def _inv_label(v):
+                if pd.isna(v):
+                    return "-"
+                return f"{v:+.0f}"
+
+            table_df["Net Akış (TL)"] = table_df["Net Akış (TL)"].apply(_flow_label)
+            table_df["AUM Değişimi (%)"] = table_df["AUM Değişimi (%)"].apply(_pct_label)
+            table_df["Yatırımcı Değişimi"] = table_df["Yatırımcı Değişimi"].apply(_inv_label)
+
+            def _degerlendir(row):
+                try:
+                    fs = str(row["Net Akış (TL)"])
+                    if "milyar" in fs:
+                        val = float(fs.split()[0])
+                        if val > 0.1:
+                            return "✅ Giriş"
+                        elif val < -0.1:
+                            return "🔴 Çıkış"
+                except Exception:
+                    pass
+                return "➖ Yatay"
+
+            table_df["Değerlendirme"] = table_df.apply(_degerlendir, axis=1)
+            table_df = table_df.iloc[::-1].reset_index(drop=True)
+
+            st.dataframe(
+                table_df,
+                use_container_width=True,
+                hide_index=True,
+            )
 
 # ---------------------------------------------------------------------------
 # Alt bilgi
