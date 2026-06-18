@@ -149,8 +149,10 @@ def calc_long_term_stats(monthly_df: pd.DataFrame) -> Dict[str, Any]:
     all_time_avg = float(flows.mean())
     all_time_std = float(flows.std())
 
-    max_idx = int(flows.idxmax())
-    min_idx = int(flows.idxmin())
+    max_pos = int(flows.argmax())
+    min_pos = int(flows.argmin())
+    max_row = monthly_df.iloc[max_pos]
+    min_row = monthly_df.iloc[min_pos]
 
     # Mevsimsel desen: her ayin tarihsel ortalamasi
     mdf = monthly_df.copy()
@@ -160,6 +162,21 @@ def calc_long_term_stats(monthly_df: pd.DataFrame) -> Dict[str, Any]:
         m_flows = mdf[mdf["month_num"] == m]["total_net_flow"]
         if len(m_flows) > 0:
             seasonal[m] = round(float(m_flows.mean()), 2)
+
+    seasonal_named = {AY_ISIMLERI.get(k, str(k)): v for k, v in seasonal.items()}
+
+    return {
+        "all_time_avg": all_time_avg,
+        "all_time_std": all_time_std,
+        "max_inflow": float(max_row["total_net_flow"]),
+        "max_inflow_month": str(max_row["year_month"]),
+        "max_outflow": float(min_row["total_net_flow"]),
+        "max_outflow_month": str(min_row["year_month"]),
+        "seasonal": seasonal,
+        "seasonal_named": seasonal_named,
+        "month_count": len(flows),
+    }
+
 
 AY_ISIMLERI = {
     1: "Ocak", 2: "Subat", 3: "Mart", 4: "Nisan",
@@ -213,8 +230,11 @@ def calc_seasonal_calendar(monthly_all: pd.DataFrame) -> List[Dict[str, Any]]:
         pos_count = int((flows > 0).sum())
         total = len(flows)
 
-        best_idx = int(flows.idxmax())
-        worst_idx = int(flows.idxmin())
+        best_pos = int(flows.argmax())
+        worst_pos = int(flows.argmin())
+        # .argmax() returns positional index; align with m_rows
+        best_row = m_rows.iloc[best_pos]
+        worst_row = m_rows.iloc[worst_pos]
 
         calendar.append({
             "month_num": m,
@@ -222,10 +242,10 @@ def calc_seasonal_calendar(monthly_all: pd.DataFrame) -> List[Dict[str, Any]]:
             "avg_flow": avg,
             "positive_years": pos_count,
             "total_years": total,
-            "best_flow": float(flows.iloc[best_idx]),
-            "best_year": int(m_rows.iloc[best_idx]["year"]),
-            "worst_flow": float(flows.iloc[worst_idx]),
-            "worst_year": int(m_rows.iloc[worst_idx]["year"]),
+            "best_flow": float(best_row["total_net_flow"]),
+            "best_year": int(best_row["year"]),
+            "worst_flow": float(worst_row["total_net_flow"]),
+            "worst_year": int(worst_row["year"]),
         })
 
     return calendar
@@ -377,53 +397,80 @@ def export_to_excel(
     """Aylik akis tablosunu ve mevsimsel takvimi Excel olarak disari aktarir."""
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        has_any_sheet = False
+
         # Sheet 1: Aylik Akis
         if not monthly_selected.empty:
-            exp = monthly_selected[[
-                "year_month_str", "total_net_flow", "aum_change_pct",
-                "investor_change", "trading_days",
-            ]].copy()
-            exp.columns = [
-                "Ay", "Net Akis (TL)", "AUM Degisimi (%)",
-                "Yatirimci Degisimi", "Islem Gunu",
-            ]
-            exp["Net Akis (Milyar TL)"] = exp["Net Akis (TL)"] / 1e9
-            exp = exp.drop(columns=["Net Akis (TL)"])
-            exp.to_excel(writer, sheet_name="Aylik Akis", index=False)
+            cols = [c for c in ["year_month_str", "total_net_flow", "aum_change_pct",
+                                "investor_change", "trading_days"] if c in monthly_selected.columns]
+            if cols:
+                exp = monthly_selected[cols].copy()
+                col_tr = {
+                    "year_month_str": "Ay",
+                    "total_net_flow": "Net Akis (TL)",
+                    "aum_change_pct": "AUM Degisimi (%)",
+                    "investor_change": "Yatirimci Degisimi",
+                    "trading_days": "Islem Gunu",
+                }
+                exp.columns = [col_tr.get(c, c) for c in cols]
+                if "Net Akis (TL)" in exp.columns:
+                    exp["Net Akis (Milyar TL)"] = exp["Net Akis (TL)"] / 1e9
+                    exp = exp.drop(columns=["Net Akis (TL)"])
+                exp.to_excel(writer, sheet_name="Aylik Akis", index=False)
+                has_any_sheet = True
 
         # Sheet 2: Mevsimsel Takvim
-        cal_df = pd.DataFrame(seasonal_calendar)
-        if not cal_df.empty:
-            cal_df["Ortalama (Milyar TL)"] = cal_df["avg_flow"] / 1e9
-            cal_df["Pozitif Orani"] = cal_df.apply(
-                lambda r: f"{r['positive_years']}/{r['total_years']}", axis=1
-            )
-            cal_df = cal_df[[
-                "month_name", "Ortalama (Milyar TL)", "Pozitif Orani",
-                "best_year", "worst_year",
-            ]]
-            cal_df.columns = [
-                "Ay", "Tarihsel Ort (Milyar TL)", "Pozitif Yil / Toplam",
-                "En Iyi Yil", "En Kotu Yil",
-            ]
-            cal_df.to_excel(writer, sheet_name="Mevsimsel Takvim", index=False)
+        if seasonal_calendar:
+            cal_df = pd.DataFrame(seasonal_calendar)
+            if not cal_df.empty:
+                cal_df["Ortalama (Milyar TL)"] = cal_df["avg_flow"] / 1e9
+                cal_df["Pozitif Orani"] = cal_df.apply(
+                    lambda r: f"{r['positive_years']}/{r['total_years']}", axis=1
+                )
+                cal_cols = [c for c in ["month_name", "Ortalama (Milyar TL)",
+                                         "Pozitif Orani", "best_year", "worst_year"]
+                            if c in cal_df.columns]
+                if cal_cols:
+                    cal_tr = {
+                        "month_name": "Ay",
+                        "Ortalama (Milyar TL)": "Tarihsel Ort (Milyar TL)",
+                        "Pozitif Orani": "Pozitif Yil / Toplam",
+                        "best_year": "En Iyi Yil",
+                        "worst_year": "En Kotu Yil",
+                    }
+                    cal_df = cal_df[cal_cols]
+                    cal_df.columns = [cal_tr.get(c, c) for c in cal_cols]
+                    cal_df.to_excel(writer, sheet_name="Mevsimsel Takvim", index=False)
+                    has_any_sheet = True
 
         # Sheet 3: Haftalik Ivme
         if not momentum_selected.empty:
-            mom_exp = momentum_selected[[
-                "year_week", "avg_daily_flow", "momentum",
-            ]].copy()
-            mom_exp.columns = ["Hafta", "Ort Gunluk Akis", "Ivme"]
-            mom_exp["Ort Gunluk Akis (Milyar TL)"] = mom_exp["Ort Gunluk Akis"] / 1e9
-            mom_exp["Ivme (Milyar TL)"] = mom_exp["Ivme"] / 1e9
-            mom_exp = mom_exp.drop(columns=["Ort Gunluk Akis", "Ivme"])
-            mom_exp.to_excel(writer, sheet_name="Haftalik Ivme", index=False)
+            mom_cols = [c for c in ["year_week", "avg_daily_flow", "momentum"]
+                        if c in momentum_selected.columns]
+            if mom_cols:
+                mom_exp = momentum_selected[mom_cols].copy()
+                mom_tr = {"year_week": "Hafta", "avg_daily_flow": "Ort Gunluk Akis",
+                         "momentum": "Ivme"}
+                mom_exp.columns = [mom_tr.get(c, c) for c in mom_cols]
+                if "Ort Gunluk Akis" in mom_exp.columns:
+                    mom_exp["Ort Gunluk Akis (Milyar TL)"] = mom_exp["Ort Gunluk Akis"] / 1e9
+                    mom_exp = mom_exp.drop(columns=["Ort Gunluk Akis"])
+                if "Ivme" in mom_exp.columns:
+                    mom_exp["Ivme (Milyar TL)"] = mom_exp["Ivme"] / 1e9
+                    mom_exp = mom_exp.drop(columns=["Ivme"])
+                mom_exp.to_excel(writer, sheet_name="Haftalik Ivme", index=False)
+                has_any_sheet = True
+
+        if not has_any_sheet:
+            pd.DataFrame({"Bilgi": ["Veri yok"]}).to_excel(
+                writer, sheet_name="Bilgi", index=False
+            )
 
     output.seek(0)
     return output
 
 
-def analyze_money_flow(
+def generate_warnings(
     monthly_all: pd.DataFrame,
     momentum_full: pd.DataFrame,
     selected_monthly: pd.DataFrame,
