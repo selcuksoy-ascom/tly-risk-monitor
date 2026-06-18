@@ -70,9 +70,10 @@ def fetch_data_cached():
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_tefas_full_history():
-    """TLY fonunun tum gecmis TEFAS verisini ceker, 1 saat cache'ler."""
-    return fetch_full_history()
+def fetch_tefas_data(fast_mode=True):
+    """TLY fonu TEFAS verisini ceker, 1 saat cache'ler.
+    fast_mode=True: son 180 gun (hizli), False: tum gecmis (yavas)."""
+    return fetch_full_history(fast_mode=fast_mode)
 
 
 # ---------------------------------------------------------------------------
@@ -536,10 +537,31 @@ else:
 st.markdown("---")
 st.markdown("### 💰 Gelişmiş Para Akışı Analizi")
 
-tefas_full = fetch_tefas_full_history()
+# Donem secimine gore hizli mi tam mi veri cekelim
+if "force_full" not in st.session_state:
+    st.session_state["force_full"] = False
+
+need_full_history = mf_period in ("Tümü", "3 Yıl") or st.session_state["force_full"]
+fetch_mode_label = "tüm geçmiş" if need_full_history else "son 6 ay"
+
+with st.spinner(f"📡 TEFAS {fetch_mode_label} verisi çekiliyor... (ilk açılışta 20-90 sn sürebilir)"):
+    tefas_full = fetch_tefas_data(fast_mode=not need_full_history)
 
 if tefas_full is None or tefas_full.empty:
-    st.warning("TEFAS geçmiş verisi şu anda çekilemiyor.")
+    st.error("TEFAS verisi çekilemedi. Para akışı analizi gösterilemiyor.")
+    st.caption("TEFAS API'si kapalı olabilir veya zaman aşımına uğramış olabilir.")
+    col_retry, col_full = st.columns(2)
+    with col_retry:
+        if st.button("🔄 Tekrar Dene", key="retry_tefas"):
+            st.session_state["force_full"] = False
+            st.cache_data.clear()
+            st.rerun()
+    with col_full:
+        if not need_full_history and st.button("📡 Tüm Geçmişi Çek (yavaş)", key="btn_full"):
+            st.session_state["force_full"] = True
+            st.cache_data.clear()
+            st.rerun()
+    st.stop()
 else:
     with st.spinner("📡 Geçmiş veriler yükleniyor... (ilk açılışta 30-60 saniye sürebilir)"):
         mf = analyze_money_flow(tefas_full, period_start=mf_start, period_end=mf_end)

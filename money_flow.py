@@ -18,8 +18,14 @@ FUND_KIND = "YAT"
 FIRST_DATE = "2021-06-15"
 
 
-def fetch_full_history() -> Optional[pd.DataFrame]:
-    """TLY fonunun tum gecmis TEFAS verisini ceker (2021-06-15'ten bugune)."""
+def fetch_full_history(fast_mode: bool = True) -> Optional[pd.DataFrame]:
+    """TLY fonunun TEFAS verisini ceker.
+
+    fast_mode=True: Sadece son 180 gunu ceker (hizli, ~20sn).
+    fast_mode=False: 180'er gunluk chunk'lar halinde tum gecmisi ceker (yavas, birkac dakika).
+
+    Streamlit cache ile ilk yuklemeden sonra tekrar cekilmez.
+    """
     try:
         from pytefas import Crawler
     except ImportError:
@@ -27,11 +33,46 @@ def fetch_full_history() -> Optional[pd.DataFrame]:
 
     try:
         c = Crawler()
-        end = date.today()
-        df = c.fetch(FIRST_DATE, end.isoformat(), kind=FUND_KIND, fund_code=FUND_CODE)
-        if df is None or df.empty:
+        today = date.today()
+
+        if fast_mode:
+            start = today - timedelta(days=180)
+            df = c.fetch(start.isoformat(), today.isoformat(), kind=FUND_KIND, fund_code=FUND_CODE)
+            if df is not None and not df.empty:
+                return df.sort_values("date").reset_index(drop=True)
             return None
-        return df.sort_values("date").reset_index(drop=True)
+
+        # Tam gecmis: 180'er gunluk chunk
+        earliest = date(2021, 6, 15)
+        chunk_days = 180
+        chunks = []
+        chunk_end = today
+
+        for _ in range(12):
+            chunk_start = chunk_end - timedelta(days=chunk_days)
+            if chunk_start < earliest:
+                chunk_start = earliest
+
+            part = c.fetch(
+                chunk_start.isoformat(),
+                chunk_end.isoformat(),
+                kind=FUND_KIND,
+                fund_code=FUND_CODE,
+            )
+            if part is not None and not part.empty:
+                chunks.append(part)
+
+            if chunk_start <= earliest:
+                break
+            chunk_end = chunk_start - timedelta(days=1)
+
+        if not chunks:
+            return None
+
+        df = pd.concat(chunks, ignore_index=True)
+        df = df.drop_duplicates(subset=["date"]).sort_values("date")
+        df = df.reset_index(drop=True)
+        return df
     except Exception:
         return None
 
