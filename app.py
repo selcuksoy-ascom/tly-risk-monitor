@@ -528,23 +528,17 @@ else:
             st.warning(w)
 
 # ---------------------------------------------------------------------------
-# Stres Testi & Fon Sağlığı
+# Stres Testi
 # ---------------------------------------------------------------------------
 st.markdown("---")
-st.markdown("### 🧪 Stres Testi & Fon Sağlığı")
+st.markdown("### 🧪 Stres Testi")
 
-# Stres testi: tam gecmis veriyle (tefas_full varsa)
-stress = analyze_stress_test(df_history=tefas_full if tefas_full is not None else None)
+# Stres testi: kendi verisini ceker (opsiyonel tam gecmis destegi yok bu asamada)
+stress = analyze_stress_test()
 
 if stress is None:
     st.caption("Stres testi verisi şu anda çekilemiyor (TEFAS veya Fonoloji erişilemez).")
 else:
-    nav = stress.get("nav")
-    nav_change = stress.get("nav_change")
-    aum = stress.get("aum")
-    aum_change_7d = stress.get("aum_change_7d")
-    inv = stress.get("investor_count")
-    inv_change_7d = stress.get("investor_change_7d")
     repo_ratio = stress.get("repo_ratio")
     cash_buffer = stress.get("cash_buffer")
     coverable_exit = stress.get("coverable_exit")
@@ -554,39 +548,6 @@ else:
     concentration_change_30d = stress.get("concentration_change_30d")
     triggered_rules = stress.get("triggered_rule_count", 0)
     warnings = stress.get("warnings", [])
-
-    sc1, sc2, sc3 = st.columns(3)
-
-    with sc1:
-        if nav is not None:
-            delta_str = f"{nav_change:+.2f}% bugün" if nav_change is not None else None
-            st.metric("NAV Fiyatı", f"{nav:,.4f} ₺", delta=delta_str,
-                      help="Fonun bir payının güncel fiyatı (TL). Günlük değişim fon performansını gösterir.")
-        else:
-            st.metric("NAV Fiyatı", "Veri yok",
-                      help="TEFAS'tan NAV verisi çekilemedi.")
-
-    with sc2:
-        if aum is not None:
-            aum_display = f"{aum/1e9:.1f} milyar ₺"
-            delta_str = f"{aum_change_7d:+.1f}% haftalık" if aum_change_7d is not None else None
-            st.metric("Fon Büyüklüğü (AUM)", aum_display, delta=delta_str,
-                      delta_color="normal" if (aum_change_7d is None or aum_change_7d >= 0) else "inverse",
-                      help="Assets Under Management — fonun yönettiği toplam varlık değeri. Haftalık değişim para giriş/çıkışının göstergesidir.")
-        else:
-            st.metric("Fon Büyüklüğü (AUM)", "Veri yok",
-                      help="TEFAS'tan AUM verisi çekilemedi.")
-
-    with sc3:
-        if inv is not None:
-            inv_display = f"{inv:,}"
-            delta_str = f"{inv_change_7d:+.0f} haftalık" if inv_change_7d is not None else None
-            st.metric("Yatırımcı Sayısı", inv_display, delta=delta_str,
-                      delta_color="normal" if (inv_change_7d is None or inv_change_7d >= 0) else "inverse",
-                      help="Fona kayıtlı kişi sayısı. Hızlı düşüş büyük yatırımcı çıkışına işaret edebilir.")
-        else:
-            st.metric("Yatırımcı Sayısı", "Veri yok",
-                      help="TEFAS'tan yatırımcı sayısı çekilemedi.")
 
     # Nakit tamponu ve karşılanabilir çıkış
     sc4, sc5 = st.columns(2)
