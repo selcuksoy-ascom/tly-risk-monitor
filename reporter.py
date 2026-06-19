@@ -343,43 +343,19 @@ def _fmt_trend_arrow(trend: str) -> str:
 
 
 def print_stress_test(stress: Optional[Dict[str, Any]]) -> None:
-    """Stres testi ve fon sagligi bolumunu yazdir. Veri yoksa sessizce atlar."""
+    """Stres testi bolumunu yazdir (NAV/AUM/yatirimci fon sagliginda gosterildi). Veri yoksa sessizce atlar."""
     if stress is None:
         return
 
     print()
-    print(C_WHITE + "[ STRES TESTI & FON SAGLIGI ]" + C_RESET)
+    print(C_WHITE + "[ STRES TESTI ]" + C_RESET)
 
-    nav = stress.get("nav")
-    nav_change = stress.get("nav_change")
-    aum = stress.get("aum")
-    aum_change_7d = stress.get("aum_change_7d")
-    inv = stress.get("investor_count")
-    inv_change_7d = stress.get("investor_change_7d")
     repo_ratio = stress.get("repo_ratio")
     cash_buffer = stress.get("cash_buffer")
     coverable_exit = stress.get("coverable_exit")
     nav_trend = stress.get("nav_trend", "flat")
     stress_level = stress.get("stress_level", "low")
     warnings = stress.get("warnings", [])
-
-    # NAV Fiyati
-    nav_str = f"{nav:,.4f} TL" if nav is not None else "N/A"
-    if nav_change is not None:
-        sign = "+" if nav_change > 0 else ""
-        nav_str += f"  ({sign}{nav_change:.2f}% bugun)"
-
-    # Fon Buyuklugu (AUM)
-    aum_str = _fmt_tl_billion(aum) if aum is not None else "N/A"
-    if aum_change_7d is not None:
-        sign = "+" if aum_change_7d > 0 else ""
-        aum_str += f"  ({sign}{aum_change_7d:.1f}% haftalik)"
-
-    # Yatirimci Sayisi
-    inv_str = f"{inv:,}" if inv is not None else "N/A"
-    if inv_change_7d is not None:
-        sign = "+" if inv_change_7d > 0 else ""
-        inv_str += f"  ({sign}{inv_change_7d:.0f} haftalik)"
 
     # Nakit Tamponu
     if repo_ratio is not None:
@@ -406,9 +382,6 @@ def print_stress_test(stress: Optional[Dict[str, Any]]) -> None:
         sign = "+" if conc_change > 0 else ""
         conc_str += f"  (30g: {sign}{conc_change:.1f}%)"
 
-    print(f"  {'NAV Fiyati':<24}: {nav_str}")
-    print(f"  {'Fon Buyuklugu (AUM)':<24}: {aum_str}")
-    print(f"  {'Yatirimci Sayisi':<24}: {inv_str}")
     print(f"  {'Konsantrasyon Orani':<24}: {conc_str}")
     print(f"  {'Nakit Tamponu':<24}: {cash_str}")
     print(f"  {'Karsilanabilir Cikis':<24}: {exit_str}")

@@ -276,11 +276,11 @@ def analyze_portfolio(
             }
             continue
 
-        weight = data["weight"]
-        change_pct = data["change_pct"]
-        volume = data["volume"]
-        avg_volume = data["avg_volume"]
-        prev_weight = data.get("prev_weight", weight)
+        weight = float(data["weight"])
+        change_pct = float(data["change_pct"]) if data["change_pct"] is not None else None
+        volume = int(data["volume"]) if data["volume"] is not None else None
+        avg_volume = float(data["avg_volume"]) if data["avg_volume"] is not None else None
+        prev_weight = float(data.get("prev_weight", weight))
 
         # Hacim oranı (tüm kurallarda kullanılacak)
         if avg_volume and avg_volume > 0:
@@ -358,18 +358,25 @@ def analyze_portfolio(
     ozatd = per_stock.get("OZATD.IS", {})
     dstkf = per_stock.get("DSTKF.IS", {})
     if not ozatd.get("is_fund") and not dstkf.get("is_fund"):
-        ozatd_vol = ozatd.get("volume_ratio")
-        dstkf_vol = dstkf.get("volume_ratio")
-        if ozatd_vol is not None and dstkf_vol is not None:
-            if ozatd_vol < 20.0 and dstkf_vol < 50.0:
-                alert = "🚨 ÇİFT LİKİDİTE KİLİDİ: OZATD ve DSTKF eşzamanlı hacim düşüşü"
-                critical_alerts.append(alert)
+        try:
+            ozatd_vol = float(ozatd.get("volume_ratio")) if ozatd.get("volume_ratio") is not None else None
+            dstkf_vol = float(dstkf.get("volume_ratio")) if dstkf.get("volume_ratio") is not None else None
+            if ozatd_vol is not None and dstkf_vol is not None:
+                if ozatd_vol < 20.0 and dstkf_vol < 50.0:
+                    alert = "🚨 ÇİFT LİKİDİTE KİLİDİ: OZATD ve DSTKF eşzamanlı hacim düşüşü"
+                    critical_alerts.append(alert)
+        except (ValueError, TypeError):
+            pass
 
     # ----- KOMBINASYON KURALI B: GRUP SARMALI -----
     # TERA+TRHOL+TEHOL ucu de -%3 altinda VE korelasyon > 0.80
     group_all_below_3 = True
     for t in GROUP_TICKERS:
         chg = per_stock.get(t, {}).get("change_pct")
+        try:
+            chg = float(chg) if chg is not None else None
+        except (ValueError, TypeError):
+            chg = None
         if chg is None or chg >= -3.0:
             group_all_below_3 = False
             break
@@ -382,23 +389,29 @@ def analyze_portfolio(
 
     # ----- KOMBINASYON KURALI C: SESSIZ COKUS -----
     # NAV 3 gun art arda dustu VE yatirimci azaliyor VE hisse hacimleri normal
-    if fund_health is not None:
+    if fund_health is not None and isinstance(fund_health, dict):
         nav_down = False
         fh_warnings = fund_health.get("warnings", [])
-        for w in fh_warnings:
-            if "art arda" in w.lower() or "değer kaybediyor" in w.lower():
-                nav_down = True
-                break
+        if isinstance(fh_warnings, list):
+            for w in fh_warnings:
+                if isinstance(w, str) and ("art arda" in w.lower() or "değer kaybediyor" in w.lower()):
+                    nav_down = True
+                    break
         # Alternatif: NAV trend asagi ve son 5 gun dustu uyarisi varsa
         if not nav_down:
             fh_trend = fund_health.get("trend", "")
-            if fh_trend == "down":
+            if isinstance(fh_trend, str) and fh_trend == "down":
                 nav_down = True
 
         inv_decreasing = False
         inv_change = fund_health.get("investor_change_7d")
-        if inv_change is not None and inv_change < 0:
-            inv_decreasing = True
+        if inv_change is not None:
+            try:
+                inv_change = float(inv_change)
+                if inv_change < 0:
+                    inv_decreasing = True
+            except (ValueError, TypeError):
+                pass
 
         # Hisse hacimleri normal mi? (kritik veya sig piyasa yok)
         volumes_normal = (

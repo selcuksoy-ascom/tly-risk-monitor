@@ -226,7 +226,14 @@ if portfolio_data is None:
 # TEFAS fon sagligi (risk analizinden once, sessiz cokus tespiti icin)
 fund_health = analyze_fund_health()
 
-analysis = analyze_portfolio(portfolio_data, fund_health=fund_health)
+try:
+    analysis = analyze_portfolio(portfolio_data, fund_health=fund_health)
+except Exception as e:
+    import traceback
+    st.error(f"Risk analizi sırasında hata: {type(e).__name__}: {e}")
+    st.code(traceback.format_exc(), language="python")
+    st.stop()
+
 sim = run_simulation(capital=capital, equity_ratio=equity_ratio, panic_rate=panic_rate)
 
 # ---------------------------------------------------------------------------

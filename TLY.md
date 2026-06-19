@@ -256,6 +256,9 @@ Tüm harici veri çekme fonksiyonları hata durumunda **None döner**, programı
 
 | Tarih | Commit | Açıklama |
 |---|---|---|
+| 2026-06-19 | — | risk_analyzer.py: Sayısal tip zorlaması (float/int) eklendi, tüm karşılaştırmalar TypeError'a karşı korumalı |
+| 2026-06-19 | — | app.py: analyze_portfolio çağrısına try/except eklendi, hata detayı gösteriliyor |
+| 2026-06-19 | — | reporter.py: print_stress_test'ten mükerrer NAV/AUM/yatırımcı satırları çıkarıldı (print_fund_health ile çakışıyordu) |
 | 2026-06-19 | — | Tüm metrik ve parametrelere tooltip (help) eklendi; Terimler Sözlüğü ve Sütun Açıklamaları expander'ları eklendi |
 | 2026-06-19 | — | Stres testi 10 kurala çıkarıldı, konsantrasyon riski, rotasyon analizi, kombinasyon kuralları eklendi |
 | 2026-06-18 | — | Mevsimsel takvim, akıllı yorum, 4-metrik dashboard, mevsimsel mod, Excel export eklendi |
