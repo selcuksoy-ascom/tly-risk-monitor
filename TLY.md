@@ -32,8 +32,9 @@ python main_android.py
 | `risk_analyzer.py` | 4 kural risk motoru (likidite, rotasyon, sistemik, sığ piyasa) | app.py, main.py |
 | `simulator.py` | T+2 valör panik simülasyonu | app.py, main.py |
 | `tefas_fetcher.py` | TEFAS'tan TLY fon sağlığı (NAV, AUM, yatırımcı) | app.py, main.py |
-| `stress_test.py` | Stres testi: Fonoloji holdings + TEFAS birleşik analizi | app.py, main.py |
-| `money_flow.py` | **YENİ** — Gelişmiş para akışı analizi (tüm geçmiş) | app.py |
+| `stress_test.py` | Stres testi: 10 kuralla tam geçmiş veri analizi, konsantrasyon riski | app.py, main.py |
+| `rotation_tracker.py` | **YENİ** — Fonoloji aylık holdings ile rotasyon tespiti ve havuz analizi | app.py, main.py |
+| `money_flow.py` | Gelişmiş para akışı analizi (tüm geçmiş) | app.py |
 | `reporter.py` | Terminal rapor formatı (colorama + tabulate) | main.py |
 | `TLY.md` | **Bu dosya** — proje dokümantasyonu | Claude |
 
@@ -48,7 +49,7 @@ PORTFOLIO = {
     "DSTKF.IS": {"name": "Destek Faktoring",  "weight": 17.71, "category": "anchor"},
     "OZATD.IS": {"name": "Ozata Denizcilik",  "weight": 17.16, "category": "anchor"},
     "TERA.IS":  {"name": "Tera Yatirim",      "weight": 11.50, "category": "group"},
-    "PEKGY.IS": {"name": "Peker GYO",          "weight": 9.89,  "category": "other"},
+    "PEKGY.IS": {"name": "Peker GYO",          "weight": 9.89,  "category": "fund"},   # GYF — likidite kuralları uygulanmaz
     "TRHOL.IS": {"name": "Tera Finansal",      "weight": 6.59,  "category": "group"},
     "TEHOL.IS": {"name": "Tera Teknoloji",     "weight": 5.50,  "category": "group"},
 }
@@ -90,27 +91,65 @@ FONOLOJI_API_KEY = ""  # Fonoloji API anahtarı
 - Ağırlık > %10 **VE** hacim < ortalamanın %20'si
 - Fiyat yönünden bağımsız, erken uyarı (🟡)
 
+### KOMBİNASYON KURALI A — Çift Likidite Kilidi
+- OZATD hacim < %20 **VE** DSTKF hacim < %50 → 🚨 ÇİFT LİKİDİTE KİLİDİ
+
+### KOMBİNASYON KURALI B — Grup Sarmalı
+- TERA+TRHOL+TEHOL üçü de -%3 altında **VE** korelasyon > 0.80 → 🚨 GRUP SARMALI BAŞLADI
+
+### KOMBİNASYON KURALI C — Sessiz Çöküş
+- NAV 3 gün art arda düştü **VE** yatırımcı azalıyor **VE** hisse hacimleri normal → ⚠️ SESSİZ ÇÖKÜŞ
+- `analyze_portfolio()` fonksiyonu opsiyonel `fund_health` parametresi alır
+
 ---
 
 ## Stres Testi (stress_test.py)
 
-TEFAS + Fonoloji verilerini birleştirir:
+TEFAS tam geçmiş (2021-06-15'ten) + Fonoloji verilerini birleştirir.
+`analyze_stress_test(df_history=None)` — opsiyonel tam geçmiş DataFrame.
 
 | Metrik | Kaynak |
 |---|---|
 | NAV, AUM, yatırımcı sayısı | TEFAS (pytefas) |
 | Ters repo oranı, nakit tamponu | Fonoloji API |
+| Konsantrasyon oranı (AUM/yatırımcı) | TEFAS |
+| Günlük AUM std (son 180g) | TEFAS |
 
-**5 stres kuralı:**
-1. Nakit tamponu <%10 → KRİTİK
-2. Yatırımcı 7 günde >%3 düşüş → KRİTİK
-3. AUM 7 günde >%5 düşüş → KRİTİK
-4. NAV 5 gün art arda düşüş → UYARI
-5. 2+ kural aynı anda → SİSTEMİK STRES
+**10 stres kuralı (otomatik seviye: 0=Düşük, 1-2=Orta, 3+=Yüksek):**
+1. Nakit tamponu <%10 → 🚨 KRİTİK
+2. Yatırımcı 7g < -%3 → 🚨 KRİTİK
+3. Yatırımcı 7g < -%1 → ⚠️ UYARI
+4. AUM 7g < -%5 → 🚨 KRİTİK
+5. AUM 7g < -%2 → ⚠️ UYARI
+6. NAV 5g art arda düşüş → ⚠️ UYARI
+7. Konsantrasyon 30g'de %15+ arttı → ⚠️ UYARI
+8. Günlük AUM değişimi > 3× std → 👁️ BİLDİRİM
+9. Yatırımcı sabit + AUM 3g hafif düşüş → ⚠️ UYARI
+10. 2+ kural aynı anda → 🚨 SİSTEMİK STRES
 
 ---
 
-## Para Akışı Analizi (money_flow.py) — YENİ
+## Rotasyon Analizi (rotation_tracker.py) — YENİ
+
+Fonoloji holdings API'sinden son 6 aylık veriyi (`?report_date=YYYY-MM-DD`) çeker.
+
+### Rotasyon Tespiti
+- Hisse ağırlığı 1 ayda >10 puan değişti → 🔄 HIZLI ROTASYON
+- Bir hisse azalırken diğeri benzer oranda (±%30) arttı → 🔄 ROTASYON ÇİFTİ
+
+### Havuz Takibi
+- Sabit havuz: DSTKF, OZATD, TEHOL, TRHOL, PEKGY (5 hisse)
+- Son 6 ayda zirve yapanlar ve taze adaylar listelenir
+- Kalan aday < 2 → ⚠️ "Rotasyon edilecek yeni hisse seçeneği azalıyor"
+
+### app.py UI
+- Rotasyon geçmişi expander'ı (son ay bilgisi)
+- 3 metrik kutusu: İzlenen Havuz, Zirve Yapan, Taze Aday
+- Zirveler ve taze aday listesi
+
+---
+
+## Para Akışı Analizi (money_flow.py)
 
 ### Veri kaynağı
 - `pytefas` ile 2021-06-15'ten bugüne tüm TLY verisi
@@ -171,15 +210,19 @@ Bu formül AUM değişiminden NAV kaynaklı değişimi çıkararak gerçek para 
 ## app.py — Streamlit Web Arayüzü (Bölüm Sırası)
 
 1. **Başlık** — TLY Risk Analiz Raporu, bugünün tarihi
-2. **Portföy Özeti** — 5 metrik kartı (toplam hisse, veri gelen, kritik hisseler, sistemik risk, hisse değeri)
-3. **Risk Skoru Tablosu** — Hisse bazlı renkli tablo (🔴🔵🟡🟢)
-4. **Sistemik Risk** — Korelasyon göstergesi + progress bar
-5. **T+2 Valör Simülasyonu** — 3 günlük panik senaryosu
-6. **Uyarılar & Loglar** — Kritik, rotasyon, sığ piyasa
-7. **Fon Sağlığı (TEFAS)** — NAV, AUM, yatırımcı metrikleri (30 günlük)
-8. **Stres Testi** — 5 metrik + nakit tamponu + stres seviyesi
-9. **Para Akışı Analizi** — Dashboard (4 metrik), akıllı yorum, mevcut ay vurgusu, export butonu, mevsimsel takvim tablosu, karşılaştırma kartı, 3 grafik (mevsimsel ref çizgili), uyarılar, aylık akış tablosu
-10. **Alt bilgi**
+2. **Terimler Sözlüğü** — Tüm terimlerin açıklandığı expandable referans tablosu (📖)
+3. **Portföy Özeti** — 5 metrik kartı (tooltip'li)
+4. **Risk Skoru Tablosu** — Hisse bazlı renkli tablo, başlıklarda ⓘ hover tooltip + Sütun Açıklamaları expander'ı
+5. **Sistemik Risk** — Korelasyon göstergesi + progress bar (tooltip'li)
+6. **T+2 Valör Simülasyonu** — 3 günlük panik senaryosu (tüm metrikler tooltip'li)
+7. **Uyarılar & Loglar** — Kritik, rotasyon, sığ piyasa
+8. **Fon Sağlığı (TEFAS)** — NAV, AUM, yatırımcı metrikleri (tooltip'li)
+9. **Stres Testi** — 10 metrik + stres seviyesi (tümü tooltip'li)
+10. **Rotasyon Analizi** — Havuz durumu (3 metrik, tooltip'li)
+11. **Para Akışı Analizi** — Dashboard (4 metrik, tooltip'li), akıllı yorum, mevcut ay vurgusu, export, mevsimsel takvim, karşılaştırma kartı, 3 grafik, uyarılar, aylık akış tablosu
+12. **Alt bilgi**
+
+**Tooltip stratejisi:** Tüm `st.metric()`, `st.number_input()`, `st.slider()`, `st.radio()`, `st.toggle()` widget'larında `help=` parametresi kullanılır. HTML tablo başlıklarında `title` attribute ile hover tooltip. Her bölüm altında açıklama expander'ları.
 
 ---
 
@@ -213,6 +256,8 @@ Tüm harici veri çekme fonksiyonları hata durumunda **None döner**, programı
 
 | Tarih | Commit | Açıklama |
 |---|---|---|
+| 2026-06-19 | — | Tüm metrik ve parametrelere tooltip (help) eklendi; Terimler Sözlüğü ve Sütun Açıklamaları expander'ları eklendi |
+| 2026-06-19 | — | Stres testi 10 kurala çıkarıldı, konsantrasyon riski, rotasyon analizi, kombinasyon kuralları eklendi |
 | 2026-06-18 | — | Mevsimsel takvim, akıllı yorum, 4-metrik dashboard, mevsimsel mod, Excel export eklendi |
 | 2026-06-18 | — | money_flow.py eklendi, app.py'ye para akışı analizi UI'ı entegre edildi |
 | 2026-06-18 öncesi | cdee046 | Stress test modülü eklendi |

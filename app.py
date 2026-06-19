@@ -27,6 +27,7 @@ from money_flow import (
     fetch_full_history, analyze_money_flow,
     export_to_excel, current_month_highlight,
 )
+from rotation_tracker import analyze_rotation
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -76,6 +77,12 @@ def fetch_tefas_data(fast_mode=True):
     return fetch_full_history(fast_mode=fast_mode)
 
 
+@st.cache_data(ttl=3600, show_spinner="📡 Fonoloji holdings geçmişi yükleniyor...")
+def fetch_rotation_data():
+    """Rotasyon analizi verisini ceker, 1 saat cache'ler."""
+    return analyze_rotation()
+
+
 # ---------------------------------------------------------------------------
 # Sidebar — Parametreler
 # ---------------------------------------------------------------------------
@@ -89,7 +96,7 @@ with st.sidebar:
         value=DEFAULT_CAPITAL,
         step=10_000,
         format="%d",
-        help="Portföyün toplam değeri. Enter = 500.000 TL",
+        help="T+2 valör simülasyonunda kullanılacak başlangıç yatırım tutarı. Varsayılan: 500.000 TL",
     )
 
     equity_ratio = st.slider(
@@ -98,7 +105,7 @@ with st.sidebar:
         max_value=100.0,
         value=EQUITY_RATIO,
         step=0.1,
-        help="Fonun hisse senedi ağırlığı (KAP'tan güncelleyin)",
+        help="Fonun hisse senedi ağırlığı. KAP raporundan güncelleyin. Geri kalanı nakit/tahvil gibi sabit varlıklardır.",
     )
 
     panic_rate = st.slider(
@@ -107,7 +114,7 @@ with st.sidebar:
         max_value=25.0,
         value=PANIC_RATE,
         step=0.5,
-        help="T+2 valör simülasyonunda günlük kayıp oranı",
+        help="T+2 valör simülasyonunda her gün için varsayılan piyasa düşüş oranı. %10 = günde %10 kayıp.",
     )
 
     st.markdown("---")
@@ -118,6 +125,7 @@ with st.sidebar:
         ["Son 60 gün", "6 Ay", "1 Yıl", "3 Yıl", "Tümü", "Özel tarih"],
         index=0,
         horizontal=False,
+        help="Para akışı grafikleri ve tablolarında hangi zaman aralığının gösterileceğini belirler.",
     )
 
     today = date.today()
@@ -139,14 +147,16 @@ with st.sidebar:
     else:
         c1, c2 = st.columns(2)
         with c1:
-            mf_start = st.date_input("Başlangıç", today - timedelta(days=60))
+            mf_start = st.date_input("Başlangıç", today - timedelta(days=60),
+                                     help="Özel tarih aralığı başlangıcı")
         with c2:
-            mf_end = st.date_input("Bitiş", today)
+            mf_end = st.date_input("Bitiş", today,
+                                   help="Özel tarih aralığı bitişi")
 
     show_seasonal_ref = st.toggle(
         "Mevsimsel Referans Çizgileri",
         value=True,
-        help="Grafiklerde her ayın tarihsel ortalamasını referans çizgisi olarak göster",
+        help="Aylık bar chart üzerinde her ayın tarihsel ortalamasını mor kesikli çizgi olarak gösterir. Mevcut akışın geçmişle kıyaslanmasını sağlar.",
     )
 
     st.markdown("---")
@@ -178,6 +188,32 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------------
+# Terimler Sözlüğü
+# ---------------------------------------------------------------------------
+with st.expander("📖 Terimler Sözlüğü", expanded=False):
+    st.markdown("""
+| Terim | Açıklama |
+|---|---|
+| **Ağırlık** | Hisse nin fon portföyündeki yüzdesi. Ne kadar yüksekse risk o kadar büyüktür. |
+| **Hacim/Ort** | Bugünkü işlem hacminin son 30 günlük ortalamaya oranı. %100 = normal, %50 altı = düşük likidite. |
+| **Likidite Durumu** | Hisse nin ne kadar kolay alınıp satılabildiği. Kritik = büyük pozisyon + düşük hacim. |
+| **Sığ Piyasa** | Günlük işlem hacmi çok düşük. Büyük alım/satım fiyatı aşırı etkiler. |
+| **Grup Korelasyonu** | TERA/TRHOL/TEHOL hisselerinin birlikte hareket derecesi. 0 = bağımsız, 1 = tam senkron. |
+| **T+2 Valörü** | Satış emrinden 2 iş günü sonra paranın hesaba geçmesi. Bu sürede piyasa hareket edebilir. |
+| **NAV (Birim Pay)** | Fonun bir payının güncel fiyatı. Fon performansının temel göstergesi. |
+| **AUM (Fon Büyüklüğü)** | Fonun toplam değeri. Düşüş = yatırımcı çıkışı, hisse satış baskısı oluşabilir. |
+| **Yatırımcı Sayısı** | Fona kayıtlı kişi sayısı. Hızlı düşüş, büyük yatırımcı çıkışının işareti olabilir. |
+| **Nakit Tamponu** | Hisse satmadan kullanılabilecek hazır nakit (ters repo). Yüksek = panikte hisse satma zorunluluğu az. |
+| **Ters Repo** | Kısa vadeli, düşük riskli, hızlı nakde çevrilebilir yatırım aracı. Likidite tamponunun ana bileşeni. |
+| **Karşılanabilir Çıkış** | Yatırımcıların yüzde kaçı aynı anda çıkmak isterse fon hisse satmadan karşılayabilir. |
+| **Konsantrasyon Oranı** | AUM / yatırımcı sayısı. Yükselmesi = az sayıda büyük yatırımcıya bağımlılık artıyor. |
+| **Rotasyon** | Fon yöneticisinin bir hisseden çıkıp başka hisseye geçme hareketi. |
+| **Stres Seviyesi** | Tetiklenen kural sayısına göre genel risk skoru. 0 = Düşük, 1-2 = Orta, 3+ = Yüksek. |
+| **İvme** | Haftalık ortalama akışın bir önceki haftaya göre değişimi. Pozitif = giriş hızlanıyor. |
+| **Z-Score** | Seçili dönemin uzun vade ortalamadan kaç standart sapma uzakta olduğu. Z > 2 veya Z < -2 = sıra dışı. |
+""")
+
+# ---------------------------------------------------------------------------
 # Veri çek ve analiz et
 # ---------------------------------------------------------------------------
 with st.spinner("📡 Yahoo Finance'den veri çekiliyor... Lütfen bekleyin."):
@@ -187,7 +223,10 @@ if portfolio_data is None:
     st.error("Veri çekilemedi. İnternet bağlantınızı kontrol edin.")
     st.stop()
 
-analysis = analyze_portfolio(portfolio_data)
+# TEFAS fon sagligi (risk analizinden once, sessiz cokus tespiti icin)
+fund_health = analyze_fund_health()
+
+analysis = analyze_portfolio(portfolio_data, fund_health=fund_health)
 sim = run_simulation(capital=capital, equity_ratio=equity_ratio, panic_rate=panic_rate)
 
 # ---------------------------------------------------------------------------
@@ -203,17 +242,22 @@ has_systemic = analysis["systemic"]["is_critical"]
 data_ok = sum(1 for d in portfolio_data.values() if not d.get("error"))
 
 with col1:
-    st.metric("Toplam Hisse", f"{total_weight:.1f}%")
+    st.metric("Toplam Hisse", f"{total_weight:.1f}%",
+              help="Portföydeki tüm hisselerin ağırlık toplamı. %100'e yakınsa fon neredeyse tamamen hisse senedindedir.")
 with col2:
-    st.metric("Veri Gelen", f"{data_ok}/{len(PORTFOLIO)}")
+    st.metric("Veri Gelen", f"{data_ok}/{len(PORTFOLIO)}",
+              help="Kaç hisseden başarıyla güncel veri çekilebildi. Eksik varsa Yahoo Finance kaynaklıdır.")
 with col3:
     st.metric("Kritik Hisseler", critical_count, delta=None,
-              delta_color="inverse" if critical_count == 0 else "off")
+              delta_color="inverse" if critical_count == 0 else "off",
+              help="Likidite kilitlenmesi tespit edilen hisse sayısı. 0 olması beklenir.")
 with col4:
     st.metric("Sistemik Risk",
-              "🔴 Var" if has_systemic else "🟢 Yok")
+              "🔴 Var" if has_systemic else "🟢 Yok",
+              help="TERA/TRHOL/TEHOL grubunda eşzamanlı düşüş + yüksek korelasyon var mı?")
 with col5:
-    st.metric("Hisse Değeri (Gün 0)", f"{sim['daily_equity_values'][0]:,.0f} ₺")
+    st.metric("Hisse Değeri (Gün 0)", f"{sim['daily_equity_values'][0]:,.0f} ₺",
+              help="Verilen anaparanın hisse senedine yatırılmış kısmının bugünkü değeri.")
 
 # ---------------------------------------------------------------------------
 # Risk tablosu
@@ -238,9 +282,20 @@ def _row_class(is_critical, is_rotation, is_thin, is_fund, is_error):
 
 headers = ["Hisse", "Ad", "Ağırlık", "Fiyat (₺)", "Değişim", "Hacim/Ort", "Durum"]
 
+_tooltips = {
+    "Hisse": "BIST ticker kodu (.IS uzantısız)",
+    "Ad": "Şirketin kısa adı",
+    "Ağırlık": "Bu hissenin fon portföyündeki yüzdesi. Ne kadar yüksekse, o hissedeki risk fonun genelini o kadar çok etkiler.",
+    "Fiyat (₺)": "Son kapanış fiyatı. GYF/Fon için --- gösterilir.",
+    "Değişim": "Günlük fiyat değişimi (%). Pozitif = yükseliş, negatif = düşüş.",
+    "Hacim/Ort": "Bugünkü işlem hacminin son 30 günlük ortalamaya oranı. %100 = normal. %50 altı = düşük likidite, çıkış zorlaşabilir.",
+    "Durum": "Bu hissenin risk durumu. Kritik = büyük pozisyon+düşük hacim. Sığ Piyasa = çok düşük işlem hacmi. Fon = likidite analizi yapılmaz.",
+}
+
 html = '<table class="risk-table"><thead><tr>'
 for h in headers:
-    html += f"<th>{h}</th>"
+    tip = _tooltips.get(h, "")
+    html += f'<th title="{tip}">{h} ⓘ</th>'
 html += "</tr></thead><tbody>"
 
 for ticker, data in analysis["per_stock"].items():
@@ -290,6 +345,19 @@ html += "</tbody></table>"
 
 st.markdown(html, unsafe_allow_html=True)
 
+with st.expander("ℹ️ Sütun Açıklamaları", expanded=False):
+    st.markdown("""
+| Sütun | Açıklama |
+|---|---|
+| **Hisse** | BIST ticker kodu (.IS uzantısız kısa gösterim). |
+| **Ad** | Şirketin kısa adı. |
+| **Ağırlık** | Hissenin fon portföyündeki yüzdesi. Yüksek ağırlık = yüksek risk etkisi. |
+| **Fiyat (₺)** | Son kapanış fiyatı (TL). GYF/Fon tipi varlıklar için fiyat gösterilmez. |
+| **Değişim** | Günlük fiyat değişimi (%). Yeşil pozitif, kırmızı negatif. |
+| **Hacim/Ort** | Bugünkü hacmin 30 günlük ortalamaya yüzdesi. %100 = normal gün. |
+| **Durum** | 🔴 Kritik / 🟡 Sığ Piyasa / 🔵 Rotasyon / 🔷 Fon / 🟢 Normal |
+""")
+
 # ---------------------------------------------------------------------------
 # Sistemik Risk
 # ---------------------------------------------------------------------------
@@ -310,9 +378,11 @@ with col_a:
             f"{corr:.3f}",
             delta=f"{(corr - CORRELATION_THRESHOLD)*100:.0f} bp",
             delta_color="inverse" if corr <= CORRELATION_THRESHOLD else "normal",
+            help="TERA, TRHOL ve TEHOL hisselerinin 30 günlük fiyat hareketlerinin birlikte hareket etme derecesi. 0 = bağımsız, 1 = tamamen birlikte. Yüksek korelasyon + düşüş = grup riski.",
         )
     else:
-        st.metric(f"Grup Korelasyonu ({tickers_str})", "Hesaplanamadı")
+        st.metric(f"Grup Korelasyonu ({tickers_str})", "Hesaplanamadı",
+                  help="Yeterli geçmiş veri olmadığı için korelasyon hesaplanamadı.")
 
 with col_b:
     if corr is not None:
@@ -345,23 +415,29 @@ st.markdown("")
 g1, g2, g3 = st.columns(3)
 
 with g1:
-    st.metric("Gün 0 (Hisse Değeri)", f"{evals[0]:,.0f} ₺")
+    st.metric("Gün 0 (Hisse Değeri)", f"{evals[0]:,.0f} ₺",
+              help="Simülasyon başlangıcında hisse portföyünün değeri.")
 with g2:
-    st.metric("Gün 1", f"{evals[1]:,.0f} ₺", delta=f"-{evals[0] - evals[1]:,.0f} ₺")
+    st.metric("Gün 1", f"{evals[1]:,.0f} ₺", delta=f"-{evals[0] - evals[1]:,.0f} ₺",
+              help="İlk iş günü sonunda, panik oranı kadar düşüş sonrası kalan değer.")
 with g3:
-    st.metric("Gün 2 (T+2)", f"{evals[2]:,.0f} ₺", delta=f"-{evals[1] - evals[2]:,.0f} ₺")
+    st.metric("Gün 2 (T+2)", f"{evals[2]:,.0f} ₺", delta=f"-{evals[1] - evals[2]:,.0f} ₺",
+              help="Satış emrinin valör tarihinde (T+2), ikinci gün düşüşü sonrası kalan değer. Paranın hesaba geçeceği günkü tahmini tutar.")
 
 st.markdown("")
 
 r1, r2, r3 = st.columns(3)
 with r1:
     st.metric("Toplam Hisse Kaybı", f"{loss_tl:,.0f} ₺",
-              delta=f"%{loss_pct:.1f}", delta_color="inverse")
+              delta=f"%{loss_pct:.1f}", delta_color="inverse",
+              help="T+2 valör süresi boyunca hisse portföyünde oluşan toplam kayıp (TL ve %).")
 with r2:
-    st.metric("Hisse Dışı Varlık (sabit)", f"{non_eq:,.0f} ₺")
+    st.metric("Hisse Dışı Varlık (sabit)", f"{non_eq:,.0f} ₺",
+              help="Fonun hisse senedi dışındaki varlıkları (nakit, tahvil vb.). Piyasa düşüşünden etkilenmez.")
 with r3:
     st.metric("Kalan Toplam Portföy", f"{remaining:,.0f} ₺",
-              delta=f"-{capital - remaining:,.0f} ₺", delta_color="inverse")
+              delta=f"-{capital - remaining:,.0f} ₺", delta_color="inverse",
+              help="T+2 sonunda hisse kaybı + sabit varlıklar toplamı. Satıştan sonra elinize geçecek tahmini net tutar.")
 
 # ---------------------------------------------------------------------------
 # Uyarılar
@@ -389,8 +465,6 @@ else:
 st.markdown("---")
 st.markdown("### 🏥 Fon Sağlığı (TEFAS)")
 
-fund_health = analyze_fund_health()
-
 if fund_health is None:
     st.caption("TEFAS verisi şu anda çekilemiyor.")
 else:
@@ -407,27 +481,33 @@ else:
     with fc1:
         if nav is not None:
             delta_str = f"{nav_change:+.2f}%" if nav_change is not None else None
-            st.metric("NAV Fiyatı", f"{nav:,.4f} ₺", delta=delta_str)
+            st.metric("NAV Fiyatı", f"{nav:,.4f} ₺", delta=delta_str,
+                      help="Fonun bir payının güncel fiyatı. Fonun günlük performansının temel göstergesidir.")
         else:
-            st.metric("NAV Fiyatı", "Veri yok")
+            st.metric("NAV Fiyatı", "Veri yok",
+                      help="TEFAS'tan NAV verisi çekilemedi.")
 
     with fc2:
         if aum is not None:
             aum_display = f"{aum/1e9:.1f} milyar ₺"
             delta_str = f"{aum_change_7d:+.1f}% haftalık" if aum_change_7d is not None else None
             st.metric("Fon Büyüklüğü", aum_display, delta=delta_str,
-                      delta_color="normal" if (aum_change_7d is None or aum_change_7d >= 0) else "inverse")
+                      delta_color="normal" if (aum_change_7d is None or aum_change_7d >= 0) else "inverse",
+                      help="Fonun toplam portföy değeri (AUM). Düşüş = yatırımcı çıkışı, hisse satış baskısı oluşabilir.")
         else:
-            st.metric("Fon Büyüklüğü", "Veri yok")
+            st.metric("Fon Büyüklüğü", "Veri yok",
+                      help="TEFAS'tan AUM verisi çekilemedi.")
 
     with fc3:
         if inv is not None:
             inv_display = f"{inv:,}"
             delta_str = f"{inv_change_7d:+.0f} haftalık" if inv_change_7d is not None else None
             st.metric("Yatırımcı Sayısı", inv_display, delta=delta_str,
-                      delta_color="normal" if (inv_change_7d is None or inv_change_7d >= 0) else "inverse")
+                      delta_color="normal" if (inv_change_7d is None or inv_change_7d >= 0) else "inverse",
+                      help="Fona kayıtlı toplam yatırımcı sayısı. Hızlı düşüş, büyük yatırımcıların çıktığının işareti olabilir.")
         else:
-            st.metric("Yatırımcı Sayısı", "Veri yok")
+            st.metric("Yatırımcı Sayısı", "Veri yok",
+                      help="TEFAS'tan yatırımcı sayısı çekilemedi.")
 
     # Trend satırı
     trend_icon = {"up": "↗ Büyüyor", "down": "↘ Daralıyor", "flat": "→ Yatay"}
@@ -446,7 +526,8 @@ else:
 st.markdown("---")
 st.markdown("### 🧪 Stres Testi & Fon Sağlığı")
 
-stress = analyze_stress_test()
+# Stres testi: tam gecmis veriyle (tefas_full varsa)
+stress = analyze_stress_test(df_history=tefas_full if tefas_full is not None else None)
 
 if stress is None:
     st.caption("Stres testi verisi şu anda çekilemiyor (TEFAS veya Fonoloji erişilemez).")
@@ -462,6 +543,9 @@ else:
     coverable_exit = stress.get("coverable_exit")
     nav_trend = stress.get("nav_trend", "flat")
     stress_level = stress.get("stress_level", "low")
+    concentration_ratio = stress.get("concentration_ratio")
+    concentration_change_30d = stress.get("concentration_change_30d")
+    triggered_rules = stress.get("triggered_rule_count", 0)
     warnings = stress.get("warnings", [])
 
     sc1, sc2, sc3 = st.columns(3)
@@ -469,27 +553,33 @@ else:
     with sc1:
         if nav is not None:
             delta_str = f"{nav_change:+.2f}% bugün" if nav_change is not None else None
-            st.metric("NAV Fiyatı", f"{nav:,.4f} ₺", delta=delta_str)
+            st.metric("NAV Fiyatı", f"{nav:,.4f} ₺", delta=delta_str,
+                      help="Fonun bir payının güncel fiyatı (TL). Günlük değişim fon performansını gösterir.")
         else:
-            st.metric("NAV Fiyatı", "Veri yok")
+            st.metric("NAV Fiyatı", "Veri yok",
+                      help="TEFAS'tan NAV verisi çekilemedi.")
 
     with sc2:
         if aum is not None:
             aum_display = f"{aum/1e9:.1f} milyar ₺"
             delta_str = f"{aum_change_7d:+.1f}% haftalık" if aum_change_7d is not None else None
             st.metric("Fon Büyüklüğü (AUM)", aum_display, delta=delta_str,
-                      delta_color="normal" if (aum_change_7d is None or aum_change_7d >= 0) else "inverse")
+                      delta_color="normal" if (aum_change_7d is None or aum_change_7d >= 0) else "inverse",
+                      help="Assets Under Management — fonun yönettiği toplam varlık değeri. Haftalık değişim para giriş/çıkışının göstergesidir.")
         else:
-            st.metric("Fon Büyüklüğü (AUM)", "Veri yok")
+            st.metric("Fon Büyüklüğü (AUM)", "Veri yok",
+                      help="TEFAS'tan AUM verisi çekilemedi.")
 
     with sc3:
         if inv is not None:
             inv_display = f"{inv:,}"
             delta_str = f"{inv_change_7d:+.0f} haftalık" if inv_change_7d is not None else None
             st.metric("Yatırımcı Sayısı", inv_display, delta=delta_str,
-                      delta_color="normal" if (inv_change_7d is None or inv_change_7d >= 0) else "inverse")
+                      delta_color="normal" if (inv_change_7d is None or inv_change_7d >= 0) else "inverse",
+                      help="Fona kayıtlı kişi sayısı. Hızlı düşüş büyük yatırımcı çıkışına işaret edebilir.")
         else:
-            st.metric("Yatırımcı Sayısı", "Veri yok")
+            st.metric("Yatırımcı Sayısı", "Veri yok",
+                      help="TEFAS'tan yatırımcı sayısı çekilemedi.")
 
     # Nakit tamponu ve karşılanabilir çıkış
     sc4, sc5 = st.columns(2)
@@ -499,16 +589,36 @@ else:
             cash_display = f"%{repo_ratio:.2f} ters repo"
             if cash_buffer is not None:
                 cash_display += f"  (~{cash_buffer/1e9:.1f} milyar ₺)"
-            st.metric("Nakit Tamponu", cash_display)
+            st.metric("Nakit Tamponu", cash_display,
+                      help="Fonun hisse satmadan kullanabileceği hazır nakit (ters repo). Yüksek olması panik anında hisse satma zorunluluğunu azaltır.")
         else:
-            st.metric("Nakit Tamponu", "Fonoloji verisi yok")
+            st.metric("Nakit Tamponu", "Fonoloji verisi yok",
+                      help="Fonoloji API'sinden ters repo verisi çekilemedi. API anahtarını config.py'de kontrol edin.")
 
     with sc5:
         if coverable_exit is not None:
             st.metric("Karşılanabilir Çıkış", f"%{coverable_exit:.2f}",
-                      help="Yatırımcıların aynı anda çıkabileceği maksimum oran")
+                      help="Yatırımcıların yüzde kaçı aynı anda çıkmak isterse fon hisse satmadan bu talebi karşılayabilir. %10 altı kritiktir.")
         else:
-            st.metric("Karşılanabilir Çıkış", "N/A")
+            st.metric("Karşılanabilir Çıkış", "N/A",
+                      help="Ters repo oranı bilinmediği için hesaplanamadı.")
+
+    sc6, sc7 = st.columns(2)
+
+    with sc6:
+        if concentration_ratio is not None:
+            conc_display = f"{concentration_ratio:.1f} milyon ₺/kişi"
+            delta_str = f"{concentration_change_30d:+.1f}% 30g" if concentration_change_30d is not None else None
+            st.metric("Konsantrasyon Oranı", conc_display, delta=delta_str,
+                      delta_color="inverse" if (concentration_change_30d is not None and concentration_change_30d > 0) else "normal",
+                      help="AUM / yatırımcı sayısı. Yükselmesi az sayıda büyük yatırımcıya bağımlılığın arttığını gösterir. Tek kişinin çıkışı orantısız etki yapabilir.")
+        else:
+            st.metric("Konsantrasyon Oranı", "Veri yok",
+                      help="AUM veya yatırımcı sayısı eksik olduğu için hesaplanamadı.")
+
+    with sc7:
+        st.metric("Tetiklenen Kural", f"{triggered_rules}/10",
+                  help="10 stres kuralından kaç tanesinin şu anda aktif olduğu. 0 = Normal, 1-2 = Orta risk, 3+ = Yüksek risk.")
 
     # NAV Trend
     trend_icon = {"up": "↗ Yükseliyor", "down": "↘ Düşüyor", "flat": "→ Yatay"}
@@ -517,9 +627,9 @@ else:
     # Stres Seviyesi
     st.markdown("#### Stres Seviyesi")
     if stress_level == "high":
-        st.error("🚨 YÜKSEK — Birden fazla risk göstergesi alarm veriyor")
+        st.error(f"🚨 YÜKSEK — {triggered_rules} kural tetiklendi, birden fazla risk göstergesi alarm veriyor")
     elif stress_level == "medium":
-        st.warning("⚠️ ORTA — Bazı risk göstergeleri uyarı seviyesinde")
+        st.warning(f"⚠️ ORTA — {triggered_rules} kural tetiklendi, bazı risk göstergeleri uyarı seviyesinde")
     else:
         st.success("✅ DÜŞÜK — Risk göstergeleri normal seviyede")
 
@@ -530,6 +640,77 @@ else:
                 st.error(w)
             else:
                 st.warning(w)
+
+# ---------------------------------------------------------------------------
+# Rotasyon Analizi
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.markdown("### 🔄 Rotasyon Analizi")
+
+rotation = fetch_rotation_data()
+
+if rotation is None:
+    st.caption("Rotasyon verisi şu anda çekilemiyor (Fonoloji API erişilemez).")
+else:
+    rotations = rotation.get("rotations", [])
+    rotation_pairs = rotation.get("rotation_pairs", [])
+    pool = rotation.get("pool", {})
+    pool_warning = rotation.get("pool_warning")
+    last_month = rotation.get("last_month", "")
+
+    with st.expander(f"📊 Aylık Rotasyon Geçmişi (son ay: {last_month})", expanded=True):
+        if rotations:
+            st.markdown("**Hızlı Rotasyonlar (>10 puan):**")
+            for r in rotations:
+                stock_short = r["stock"].replace(".IS", "")
+                direction = "↗" if r["change_pp"] > 0 else "↘"
+                st.markdown(
+                    f"- {direction} **{stock_short}**: %{r['from_weight']:.1f} → "
+                    f"%{r['to_weight']:.1f} ({r['change_pp']:+.1f} pp) — *{r['month']}*"
+                )
+        else:
+            st.caption("Son 6 ayda rotasyon tespit edilmedi.")
+
+        if rotation_pairs:
+            st.markdown("**Doldur-Boşalt Desenleri:**")
+            for rp in rotation_pairs:
+                a_short = rp["stock_a"].replace(".IS", "")
+                b_short = rp["stock_b"].replace(".IS", "")
+                st.markdown(
+                    f"- {a_short} {rp['delta_a']:+.1f}pp / "
+                    f"{b_short} {rp['delta_b']:+.1f}pp — *{rp['month']}*"
+                )
+
+    # Havuz durumu
+    if pool:
+        rcol1, rcol2, rcol3 = st.columns(3)
+        with rcol1:
+            st.metric("İzlenen Havuz", pool.get("total", 0),
+                      help="Rotasyon için izlenen sığ hisse sayısı (DSTKF, OZATD, TEHOL, TRHOL, PEKGY).")
+        with rcol2:
+            st.metric("Zirve Yapan", pool.get("used", 0),
+                      help="Son 6 ayda en yüksek ağırlığına ulaşmış (zirve yapmış) hisse sayısı.")
+        with rcol3:
+            st.metric("Taze Aday", pool.get("remaining", 0),
+                      delta="⚠️ Havuz daralıyor" if pool.get("remaining", 5) < 2 else None,
+                      help="Henüz zirve yapmamış, rotasyon için kullanılabilecek hisse sayısı. 2'den azsa havuz daralıyor demektir.")
+
+        peaks = pool.get("peaks", [])
+        fresh = pool.get("fresh", [])
+
+        if peaks:
+            peak_text = " | ".join(
+                f"{p['stock'].replace('.IS', '')}: %{p['weight']:.1f} ({p['month']})"
+                for p in peaks
+            )
+            st.caption(f"**Zirveler:** {peak_text}")
+
+        if fresh:
+            fresh_names = ", ".join(s.replace(".IS", "") for s in fresh)
+            st.caption(f"**Taze Aday:** {fresh_names}")
+
+    if pool_warning:
+        st.warning(pool_warning)
 
 # ---------------------------------------------------------------------------
 # Gelişmiş Para Akışı Analizi
@@ -618,13 +799,17 @@ else:
 
         d1, d2, d3, d4 = st.columns(4)
         with d1:
-            st.metric("Bu Ay Akış", f"{curr_flow/1e9:+.1f} milyar ₺")
+            st.metric("Bu Ay Akış", f"{curr_flow/1e9:+.1f} milyar ₺",
+                      help="Bu ay fondaki net para giriş/çıkışı. Pozitif = para giriyor, negatif = para çıkıyor.")
         with d2:
-            st.metric("İvme Durumu", mom_status)
+            st.metric("İvme Durumu", mom_status,
+                      help="Haftalık ortalama akışın bir önceki haftaya göre değişimi. Yükseliyor = giriş hızlanıyor, Düşüyor = giriş yavaşlıyor veya çıkış başlıyor.")
         with d3:
-            st.metric("Uzun Vade Ort", f"{all_time_avg/1e9:+.1f} milyar ₺/ay")
+            st.metric("Uzun Vade Ort", f"{all_time_avg/1e9:+.1f} milyar ₺/ay",
+                      help="2021'den bugüne tüm ayların ortalama net akışı. Mevcut ayın bu ortalamaya göre konumunu değerlendirmek için referans.")
         with d4:
-            st.metric("Mevsimsel Uyum", seasonal_match)
+            st.metric("Mevsimsel Uyum", seasonal_match,
+                      help="Bu ayın akış yönü (giriş/çıkış), aynı ayın tarihsel ortalamasıyla aynı yönde mi? Aykırı = bu ay tarihsel desene ters.")
 
         # =====================================================================
         # AKILLI YORUM
@@ -648,7 +833,7 @@ else:
         st.download_button(
             label="📥 Raporu İndir (Excel)",
             data=export_buffer,
-            file_name=f"TLY_Para_Akisi_{date.today().strftime('%Y%m%d')}.xlsx",
+            file_name=f"TLY_Rapor_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
@@ -662,19 +847,23 @@ else:
                 st.metric(
                     "Seçili Dönem Ortalaması",
                     f"{comp['period_avg']/1e9:+.2f} milyar ₺/ay",
+                    help="Sidebar'dan seçilen dönemdeki aylık ortalama net akış.",
                 )
             with k2:
                 st.metric(
                     "Uzun Vade Ortalaması",
                     f"{comp['all_time_avg']/1e9:+.2f} milyar ₺/ay",
+                    help="2021'den bugüne tüm ayların ortalaması. Dönem ortalaması ile kıyaslamak için referans değer.",
                 )
             with k3:
                 pct = comp.get("pct_diff")
                 st.metric("Fark",
-                          f"{pct:+.1f}%" if pct is not None else "N/A")
+                          f"{pct:+.1f}%" if pct is not None else "N/A",
+                          help="Seçili dönem ortalamasının uzun vade ortalamadan yüzdesel sapması.")
             with k4:
                 zs = comp.get("z_score")
-                st.metric("Z-Score", f"{zs:.2f}" if zs is not None else "N/A")
+                st.metric("Z-Score", f"{zs:.2f}" if zs is not None else "N/A",
+                          help="Seçili dönemin kaç standart sapma uzakta olduğu. |Z| > 2 = istatistiksel olarak sıra dışı, |Z| > 3 = aşırı uç değer.")
             st.info(f"**Değerlendirme:** {comp['assessment']}")
 
             with st.expander("📈 Uzun Vade İstatistikler"):
@@ -684,6 +873,7 @@ else:
                     st.metric(
                         "En Yüksek Aylık Giriş",
                         f"{mi/1e9:+.2f} milyar ₺" if mi is not None else "-",
+                        help="2021'den bugüne en fazla net para girişi olan ay.",
                     )
                     st.caption(str(lt.get("max_inflow_month", "")))
                 with s2:
@@ -691,12 +881,14 @@ else:
                     st.metric(
                         "En Yüksek Aylık Çıkış",
                         f"{mo/1e9:+.2f} milyar ₺" if mo is not None else "-",
+                        help="2021'den bugüne en fazla net para çıkışı olan ay.",
                     )
                     st.caption(str(lt.get("max_outflow_month", "")))
                 with s3:
                     st.metric(
                         "Standart Sapma",
                         f"{lt['all_time_std']/1e9:.2f} milyar ₺",
+                        help="Aylık net akışların oynaklığı. Yüksek std = akışlar aydan aya çok değişken. Z-Score hesaplamasında kullanılır.",
                     )
 
         # =====================================================================

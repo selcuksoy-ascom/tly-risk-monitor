@@ -1,8 +1,9 @@
 # =============================================================================
-# stress_test.py - Stres Testi & Fon Sagligi Modulu
+# stress_test.py - Kapsamli Stres Testi & Fon Sagligi Modulu
 # =============================================================================
-# TEFAS verisi + Fonoloji holdings ile nakit tamponu, yatirimci kacisi,
-# AUM erimesi, NAV trendi ve birlesik stres analizi yapar.
+# TEFAS tam gecmis verisi + Fonoloji holdings ile nakit tamponu, yatirimci
+# kacisi, AUM erimesi, NAV trendi, konsantrasyon riski ve birlesik stres
+# analizi yapar.
 # Hata durumunda sessizce None doner, diger moduller etkilenmez.
 # =============================================================================
 
@@ -12,10 +13,11 @@ import urllib.request
 import json
 
 import pandas as pd
+import numpy as np
 
 FUND_CODE = "TLY"
 FUND_KIND = "YAT"
-HISTORY_DAYS = 50
+HISTORY_DAYS = 90  # parametresiz cagrildiginda cekilecek gun sayisi
 
 # Uyari esikleri
 CASH_BUFFER_CRITICAL = 10.0       # %10 alti kritik
@@ -24,10 +26,12 @@ INVESTOR_DROP_CRITICAL = -3.0     # %3 dusus kritik
 AUM_DROP_WARNING = -2.0           # %2 dusus uyari
 AUM_DROP_CRITICAL = -5.0          # %5 dusus kritik
 NAV_CONSECUTIVE_DAYS = 5
+CONCENTRATION_INCREASE_WARN = 15.0  # %15 artis uyarisi
+AUM_STD_MULTIPLIER = 3.0            # 3x std → buyuk tek seferlik islem
 
 
-def _fetch_tefas_data() -> Optional[pd.DataFrame]:
-    """TLY fonunun son 30 gunluk TEFAS verisini ceker."""
+def _fetch_tefas_data(days: int = HISTORY_DAYS) -> Optional[pd.DataFrame]:
+    """TLY fonunun son N gunluk TEFAS verisini ceker (parametresiz kullanim)."""
     try:
         from pytefas import Crawler
     except ImportError:
@@ -36,13 +40,8 @@ def _fetch_tefas_data() -> Optional[pd.DataFrame]:
     try:
         c = Crawler()
         end = date.today()
-        start = end - timedelta(days=HISTORY_DAYS + 10)
-        df = c.fetch(
-            start.isoformat(),
-            end.isoformat(),
-            kind=FUND_KIND,
-            fund_code=FUND_CODE,
-        )
+        start = end - timedelta(days=days + 10)
+        df = c.fetch(start.isoformat(), end.isoformat(), kind=FUND_KIND, fund_code=FUND_CODE)
         if df is None or df.empty:
             return None
         return df.sort_values("date").reset_index(drop=True)
@@ -114,12 +113,57 @@ def _consecutive_down(series: pd.Series, n: int) -> bool:
     return all(window.iloc[i] > window.iloc[i + 1] for i in range(len(window) - 1))
 
 
-def analyze_stress_test() -> Optional[Dict[str, Any]]:
+def _consecutive_small_aum_drops(df: pd.DataFrame, n: int = 3) -> bool:
+    """
+    Yatirimci sayisi sabitken AUM 3 gun ust uste %0.5-1 arasi hafif dusus var mi?
+    """
+    inv_col = "investor_count"
+    aum_col = "portfolio_size"
+    price_col = "price"
+
+    if inv_col not in df.columns or aum_col not in df.columns or price_col not in df.columns:
+        return False
+
+    valid = df[df[price_col] > 0].copy()
+    if len(valid) < n + 2:
+        return False
+
+    # Son n gunun yatirimci sayisi
+    last_n_inv = df[inv_col].dropna().tail(n)
+    if len(last_n_inv) < n:
+        return False
+    # Yatirimci sabit mi? (degisim < 1 kisi)
+    if last_n_inv.max() - last_n_inv.min() > 1:
+        return False
+
+    # Son n gunde AUM her gun hafif dusuyor mu?
+    aum_series = valid[aum_col].tail(n + 1)
+    if len(aum_series) < n + 1:
+        return False
+
+    for i in range(1, len(aum_series)):
+        prev = aum_series.iloc[i - 1]
+        curr = aum_series.iloc[i]
+        if prev <= 0:
+            return False
+        pct = (curr - prev) / prev * 100.0
+        if not (-1.0 <= pct <= -0.5):
+            return False
+
+    return True
+
+
+def analyze_stress_test(df_history: Optional[pd.DataFrame] = None) -> Optional[Dict[str, Any]]:
     """
     Stres testi ve fon sagligi analizi yapar.
 
+    Args:
+        df_history: Opsiyonel, money_flow.fetch_full_history() ciktisi.
+                    Verilirse tam gecmis uzerinden konsantrasyon, AUM std
+                    hesaplanir. Verilmezse son 90 gun cekilir.
+
     Returns:
-        dict veya None (hata / veri yoksa):
+        dict veya None:
         {
             'nav': float,
             'nav_change': float,
@@ -131,12 +175,24 @@ def analyze_stress_test() -> Optional[Dict[str, Any]]:
             'cash_buffer': float,
             'coverable_exit': float,
             'nav_down_5d': bool,
-            'nav_trend': str,          # 'up', 'down', 'flat'
-            'stress_level': str,       # 'low', 'medium', 'high'
+            'nav_trend': str,
+            'concentration_ratio': float,        # milyon TL/kisi
+            'concentration_change_30d': float,   # % degisim
+            'daily_aum_std': float,              # gunluk AUM degisim std
+            'stress_level': str,
+            'triggered_rule_count': int,
             'warnings': list[str],
         }
     """
-    df = _fetch_tefas_data()
+    # Tam gecmis verildiyse onu kullan, yoksa kendimiz cekelim
+    if df_history is not None and not df_history.empty:
+        df = df_history.copy()
+        df = df.sort_values("date").reset_index(drop=True)
+        use_full_history = True
+    else:
+        df = _fetch_tefas_data()
+        use_full_history = False
+
     if df is None or df.empty:
         return None
 
@@ -184,6 +240,37 @@ def analyze_stress_test() -> Optional[Dict[str, Any]]:
                 elif diff < -0.002:
                     nav_trend = "down"
 
+        # ---- Konsantrasyon orani (AUM / yatirimci sayisi) ----
+        concentration_ratio = None
+        concentration_change_30d = None
+        if inv is not None and inv > 0 and aum is not None:
+            concentration_ratio = round(aum / inv / 1e6, 2)  # milyon TL/kisi
+
+            # 30 gun onceki konsantrasyon
+            inv_series = df[inv_col].dropna()
+            aum_valid = valid_df[aum_col].dropna()
+            if len(inv_series) >= 31 and len(aum_valid) >= 31:
+                inv_30d = inv_series.iloc[-31]
+                aum_30d = aum_valid.iloc[-31]
+                if inv_30d > 0 and aum_30d > 0:
+                    conc_30d = aum_30d / inv_30d / 1e6
+                    if conc_30d > 0:
+                        concentration_change_30d = round(
+                            ((concentration_ratio - conc_30d) / conc_30d) * 100.0, 2
+                        )
+
+        # ---- Gunluk AUM degisim standart sapmasi ----
+        daily_aum_std = None
+        daily_aum_change_pct = None
+        if use_full_history and len(valid_df) >= 30:
+            # Son 180 gunluk AUM degisimlerinin std'si
+            aum_changes = valid_df[aum_col].pct_change().dropna()
+            if len(aum_changes) > 0:
+                daily_aum_std = round(float(aum_changes.tail(180).std()) * 100.0, 4)
+                # En son gunluk AUM degisimi
+                if len(aum_changes) >= 1:
+                    daily_aum_change_pct = round(float(aum_changes.iloc[-1]) * 100.0, 4)
+
         # ---- Fonoloji holdings cek ----
         holdings = _fetch_holdings()
         repo_ratio = _calc_repo_ratio(holdings) if holdings else None
@@ -195,51 +282,73 @@ def analyze_stress_test() -> Optional[Dict[str, Any]]:
             cash_buffer = (repo_ratio / 100.0) * aum if repo_ratio > 0 else 0.0
             coverable_exit = repo_ratio
 
-        # ---- Uyari kurallari ----
+        # =====================================================================
+        # UYARI KURALLARI
+        # =====================================================================
         warnings = []
-        triggered_rules = 0
+        rule_count = 0
 
-        # KURAL 1 - Nakit Tamponu
+        # KURAL 1: Nakit tamponu yetersiz
         if coverable_exit is not None and coverable_exit < CASH_BUFFER_CRITICAL:
             warnings.append(
-                f"🚨 KRITIK: Nakit tamponu yetersiz, "
-                f"yatirimcilarin %{coverable_exit:.1f}'i cikmak isterse hisse satilmak zorunda"
+                f"🚨 KRİTİK: Nakit tamponu yetersiz, "
+                f"yatırımcıların %{coverable_exit:.1f}'i çıkmak isterse hisse satılmak zorunda"
             )
-            triggered_rules += 1
+            rule_count += 1
 
-        # KURAL 2 - Yatirimci Kacisi
+        # KURAL 2-3: Yatirimci degisimi
         if inv_change_7d is not None:
             if inv_change_7d < INVESTOR_DROP_CRITICAL:
-                warnings.append("🚨 KRITIK: Fondan yatirimci cikisi hizlaniyor")
-                triggered_rules += 1
+                warnings.append("🚨 KRİTİK: Yatırımcı kaçışı hızlanıyor")
+                rule_count += 1
             elif inv_change_7d < INVESTOR_DROP_WARNING:
-                warnings.append("⚠️ UYARI: Yatirimci sayisi azaliyor")
-                triggered_rules += 1
+                warnings.append("⚠️ UYARI: Yatırımcı sayısı azalıyor")
+                rule_count += 1
 
-        # KURAL 3 - AUM Erimesi
+        # KURAL 4-5: AUM degisimi
         if aum_change_7d is not None:
             if aum_change_7d < AUM_DROP_CRITICAL:
-                warnings.append("🚨 KRITIK: Fon buyuklugu hizla eriyor")
-                triggered_rules += 1
+                warnings.append("🚨 KRİTİK: AUM hızla eriyor")
+                rule_count += 1
             elif aum_change_7d < AUM_DROP_WARNING:
-                warnings.append("⚠️ UYARI: Fon buyuklugu azaliyor")
-                triggered_rules += 1
+                warnings.append("⚠️ UYARI: AUM azalıyor")
+                rule_count += 1
 
-        # KURAL 4 - NAV Trend
+        # KURAL 6: NAV 5 gun art arda dusus
         if nav_down_5d:
-            warnings.append("⚠️ UYARI: NAV 5 gundur dusuyor")
-            triggered_rules += 1
+            warnings.append("⚠️ UYARI: NAV trendi negatif, 5 gündür düşüyor")
+            rule_count += 1
 
-        # KURAL 5 - Birlesik Stres
-        if triggered_rules >= 2:
-            warnings.append("🚨 SISTEMIK STRES: Birden fazla risk gostergesi ayni anda alarm veriyor")
+        # KURAL 7: Konsantrasyon orani artisi
+        if concentration_change_30d is not None and concentration_change_30d > CONCENTRATION_INCREASE_WARN:
+            warnings.append(
+                "⚠️ UYARI: Ortalama yatırım büyüklüğü artıyor, "
+                "fon büyük yatırımcılara daha bağımlı hale geliyor"
+            )
+            rule_count += 1
 
-        # Stres seviyesi
-        has_critical = any("KRITIK" in w for w in warnings)
-        has_warning = any("UYARI" in w for w in warnings)
-        if has_critical:
+        # KURAL 8: Buyuk tek seferlik giris/cikis (gunluk AUM > 3x std)
+        if daily_aum_std is not None and daily_aum_change_pct is not None and daily_aum_std > 0:
+            if abs(daily_aum_change_pct) > AUM_STD_MULTIPLIER * daily_aum_std:
+                direction = "giriş" if daily_aum_change_pct > 0 else "çıkış"
+                warnings.append(f"👁️ Büyük tek seferlik {direction} tespit edildi")
+                # Bu kural rule_count'u artirmaz, bildirim niteliginde
+
+        # KURAL 9: Yatirimci sabit + AUM 3 gun hafif dusus → kademeli cikis
+        if _consecutive_small_aum_drops(df, n=3):
+            warnings.append("⚠️ Olası kademeli çıkış başlamış olabilir")
+            rule_count += 1
+
+        # KURAL 10: Birlesik stres (2+ kural aynı anda)
+        if rule_count >= 2:
+            warnings.append("🚨 SİSTEMİK STRES: Birden fazla risk göstergesi aynı anda alarm veriyor")
+
+        # =====================================================================
+        # STRES SEVIYESI (otomatik)
+        # =====================================================================
+        if rule_count >= 3:
             stress_level = "high"
-        elif has_warning:
+        elif rule_count >= 1:
             stress_level = "medium"
         else:
             stress_level = "low"
@@ -256,7 +365,11 @@ def analyze_stress_test() -> Optional[Dict[str, Any]]:
             "coverable_exit": coverable_exit,
             "nav_down_5d": nav_down_5d,
             "nav_trend": nav_trend,
+            "concentration_ratio": concentration_ratio,
+            "concentration_change_30d": concentration_change_30d,
+            "daily_aum_std": daily_aum_std,
             "stress_level": stress_level,
+            "triggered_rule_count": rule_count,
             "warnings": warnings,
         }
     except Exception:
