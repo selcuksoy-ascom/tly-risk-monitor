@@ -75,4 +75,4 @@ PRICE_DROP_THRESHOLD = -5.0
 HISTORY_DAYS = 30
 
 # Fonoloji API anahtarı (https://fonoloji.com)
-FONOLOJI_API_KEY = ""
+FONOLOJI_API_KEY = "fon_PT3alvQwy3575dlOUTvytHigzFKyBJnF"

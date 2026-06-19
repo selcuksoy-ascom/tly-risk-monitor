@@ -51,6 +51,8 @@ def _fetch_holdings_for_date(report_date: str) -> Optional[Dict[str, Any]]:
         url = f"https://fonoloji.com/v1/funds/TLY/holdings?report_date={report_date}"
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {FONOLOJI_API_KEY}")
+        req.add_header("User-Agent", "TLY-Risk-Monitor/1.0")
+        req.add_header("Accept", "application/json")
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception:
@@ -74,9 +76,12 @@ def _extract_stock_weights(holdings: Dict[str, Any]) -> Dict[str, float]:
             if not isinstance(asset_type, str):
                 continue
             if asset_type.lower() in ("stock", "hisse", "equity"):
-                ticker = item.get("ticker", item.get("code", item.get("symbol", "")))
+                ticker = item.get("asset_code", item.get("ticker", item.get("code", item.get("symbol", ""))))
                 weight = item.get("weight", item.get("ratio", 0))
                 if ticker and weight:
+                    # API .IS soneki olmadan doner, havuzla eslesmesi icin .IS ekle
+                    if not ticker.endswith(".IS"):
+                        ticker = ticker + ".IS"
                     weights[ticker] = float(weight)
         return weights
     except Exception:

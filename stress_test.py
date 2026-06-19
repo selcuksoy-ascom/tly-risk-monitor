@@ -65,6 +65,8 @@ def _fetch_holdings() -> Optional[Dict[str, Any]]:
         url = "https://fonoloji.com/v1/funds/TLY/holdings"
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {FONOLOJI_API_KEY}")
+        req.add_header("User-Agent", "TLY-Risk-Monitor/1.0")
+        req.add_header("Accept", "application/json")
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8")
             data = json.loads(raw)
