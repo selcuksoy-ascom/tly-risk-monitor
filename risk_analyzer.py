@@ -220,6 +220,74 @@ def check_thin_market(
 
 
 # ---------------------------------------------------------------------------
+# KURAL 5: Taban Serisi Tespiti
+# ---------------------------------------------------------------------------
+
+LIMIT_DOWN_THRESHOLD = -9.5          # BIST taban: -%10 (tolerans ile -%9.5)
+LIMIT_DOWN_TODAY_WARN = -5.0         # Bugun -5% alti + dun tabansa → erken uyari
+
+def check_floor_series(
+    ticker: str,
+    change_pct: Optional[float],
+    history: Optional[pd.DataFrame],
+) -> Tuple[bool, str, bool]:
+    """
+    KURAL 5: Art arda taban yapan hisseyi tespit eder.
+
+    Tetikleyici:
+      - Bugun taban (-%9.5 veya alti) VE dun de tabandi  → 🚨 KRITIK TABAN SERISI
+      - Bugun taban (tek basina)                          → ⚠️  TABAN UYARISI (yarin tekrar ederse kritik)
+
+    Returns:
+        (is_critical, is_warning, message) — critical doubles as warning
+    """
+    if change_pct is None:
+        return False, False, ""
+
+    today_is_floor = change_pct <= LIMIT_DOWN_THRESHOLD
+
+    if not today_is_floor:
+        return False, False, ""
+
+    # Bugun taban — tek gunluk uyari her zaman verilir
+    single_msg = (
+        f"⚠️ TABAN: {ticker} bugun %{change_pct:.1f} ile taban yapti, "
+        f"yarin tekrar taban olursa kritik alarm tetiklenir"
+    )
+
+    if history is None or history.empty or len(history) < 3:
+        return False, True, single_msg
+
+    try:
+        close_prices = history["Close"]
+        if len(close_prices) < 3:
+            return False, True, single_msg
+
+        yesterday_close = float(close_prices.iloc[-2])
+        prev_day_close = float(close_prices.iloc[-3])
+
+        if prev_day_close > 0 and yesterday_close > 0:
+            yesterday_change = ((yesterday_close - prev_day_close) / prev_day_close) * 100.0
+        else:
+            return False, True, single_msg
+
+        yesterday_was_floor = yesterday_change <= LIMIT_DOWN_THRESHOLD
+
+        if yesterday_was_floor:
+            return True, True, (
+                f"🚨 TABAN SERISI: {ticker} art arda 2 gun taban "
+                f"(dun %{yesterday_change:.1f}, bugun %{change_pct:.1f})"
+            )
+        else:
+            return False, True, single_msg
+
+    except Exception:
+        pass
+
+    return False, True, single_msg
+
+
+# ---------------------------------------------------------------------------
 # Ana Analiz Fonksiyonu
 # ---------------------------------------------------------------------------
 
@@ -340,6 +408,22 @@ def analyze_portfolio(
             "is_thin_market": is_thin,
             "alert_message": liq_msg if is_critical else (thin_msg if is_thin else None),
         }
+
+        # ----- KURAL 5: Taban Serisi Kontrolü (her hisse icin) -----
+        is_floor_crit, is_floor_warn, floor_msg = check_floor_series(
+            ticker, change_pct, data.get("history")
+        )
+
+        if is_floor_crit:
+            critical_alerts.append(f"{ticker} ({data['name']}): {floor_msg}")
+            per_stock[ticker]["is_critical"] = True
+            existing_alert = per_stock[ticker].get("alert_message")
+            if existing_alert:
+                per_stock[ticker]["alert_message"] = f"{existing_alert} | {floor_msg}"
+            else:
+                per_stock[ticker]["alert_message"] = floor_msg
+        elif is_floor_warn:
+            thin_market_alerts.append(f"{ticker} ({data['name']}): {floor_msg}")
 
     # ----- KURAL 3: Sistemik Çöküş -----
     corr_value, is_systemic, systemic_msg = check_systemic_collapse(portfolio_data)

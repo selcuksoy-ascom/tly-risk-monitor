@@ -27,7 +27,7 @@ PORTFOLIO = {
     "PEKGY.IS": {
         "name": "Peker GYO",
         "weight": 9.89,
-        "category": "fund",  # GYF — hacim bazlı likidite kuralları uygulanmaz
+        "category": "anchor",  # Normal hisse (GYO), TPKGY FON ile karıştırma
         "prev_weight": 9.89,
     },
     "TRHOL.IS": {

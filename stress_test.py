@@ -50,13 +50,15 @@ def _fetch_tefas_data(days: int = HISTORY_DAYS) -> Optional[pd.DataFrame]:
 
 
 def _fetch_holdings() -> Optional[Dict[str, Any]]:
-    """Fonoloji API'den TLY holdings verisini ceker."""
+    """Fonoloji API'den TLY holdings verisini ceker. Hata sebebini debug loguna yazar."""
     try:
         from config import FONOLOJI_API_KEY
     except ImportError:
+        print("  [DEBUG] config'den FONOLOJI_API_KEY import edilemedi")
         return None
 
     if not FONOLOJI_API_KEY:
+        print("  [DEBUG] FONOLOJI_API_KEY bos — nakit tamponu hesaplanamaz")
         return None
 
     try:
@@ -64,8 +66,25 @@ def _fetch_holdings() -> Optional[Dict[str, Any]]:
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {FONOLOJI_API_KEY}")
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception:
+            raw = resp.read().decode("utf-8")
+            data = json.loads(raw)
+            print(f"  [DEBUG] Fonoloji holdings alindi, tip={type(data).__name__}")
+            # Ilk birkac key'i goster
+            if isinstance(data, dict):
+                keys = list(data.keys())
+                print(f"  [DEBUG]   root keys: {keys[:5]}")
+                inner = data.get("data", data)
+                if isinstance(inner, dict):
+                    inner_keys = list(inner.keys())[:5]
+                    print(f"  [DEBUG]   inner keys: {inner_keys}")
+                    items = inner.get("holdings", inner.get("items", []))
+                    if isinstance(items, list) and len(items) > 0:
+                        item0 = items[0]
+                        print(f"  [DEBUG]   ilk holding keys: {list(item0.keys())[:8]}")
+                        print(f"  [DEBUG]   ilk holding ornek: {str(item0)[:200]}")
+            return data
+    except Exception as e:
+        print(f"  [DEBUG] Fonoloji API hatasi: {type(e).__name__}: {e}")
         return None
 
 
@@ -76,9 +95,11 @@ def _calc_repo_ratio(holdings: Dict[str, Any]) -> Optional[float]:
         if isinstance(items, dict):
             items = items.get("holdings", items.get("items", []))
         if not isinstance(items, list):
+            print(f"  [DEBUG] _calc_repo_ratio: items list degil, tip={type(items).__name__}")
             return None
 
         repo_weight = 0.0
+        found_repo = False
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -86,9 +107,22 @@ def _calc_repo_ratio(holdings: Dict[str, Any]) -> Optional[float]:
             if isinstance(asset_type, str) and asset_type.lower() == "repo":
                 weight = item.get("weight", item.get("ratio", 0))
                 repo_weight += float(weight)
+                found_repo = True
+                print(f"  [DEBUG]   repo bulundu: weight={weight}, topRepo={repo_weight:.2f}")
+
+        if not found_repo:
+            # Varlik tiplerini listele (debug)
+            types_seen = set()
+            for item in items:
+                if isinstance(item, dict):
+                    t = item.get("asset_type", item.get("type", "?"))
+                    types_seen.add(str(t))
+            print(f"  [DEBUG] _calc_repo_ratio: repo bulunamadi, mevcut tipler: {sorted(types_seen)}")
+            return 0.0  # repo yoksa 0 dondur (None yerine)
 
         return repo_weight
-    except Exception:
+    except Exception as e:
+        print(f"  [DEBUG] _calc_repo_ratio hata: {type(e).__name__}: {e}")
         return None
 
 

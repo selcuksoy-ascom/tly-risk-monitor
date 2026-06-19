@@ -91,6 +91,11 @@ FONOLOJI_API_KEY = ""  # Fonoloji API anahtarı
 - Ağırlık > %10 **VE** hacim < ortalamanın %20'si
 - Fiyat yönünden bağımsız, erken uyarı (🟡)
 
+### KURAL 5 — Taban Serisi Tespiti (YENİ)
+- Bugün -%9.5+ (taban) → ⚠️ TABAN UYARISI (tek başına, thin_market_alerts'e eklenir)
+- Bugün taban **VE** dün de taban → 🚨 KRİTİK TABAN SERİSİ (critical_alerts'e eklenir)
+- Yarın tekrar taban olursa kritik alarm tetiklenir
+
 ### KOMBİNASYON KURALI A — Çift Likidite Kilidi
 - OZATD hacim < %20 **VE** DSTKF hacim < %50 → 🚨 ÇİFT LİKİDİTE KİLİDİ
 
@@ -256,6 +261,7 @@ Tüm harici veri çekme fonksiyonları hata durumunda **None döner**, programı
 
 | Tarih | Commit | Açıklama |
 |---|---|---|
+| 2026-06-19 | — | KURAL 5 eklendi: Taban serisi tespiti (tek taban=uyari, cift taban=kritik); PEKGY.IS fund yerine anchor yapildi; Fonoloji API debug log eklendi |
 | 2026-06-19 | — | risk_analyzer.py: Sayısal tip zorlaması (float/int) eklendi, tüm karşılaştırmalar TypeError'a karşı korumalı |
 | 2026-06-19 | — | app.py: analyze_portfolio çağrısına try/except eklendi, hata detayı gösteriliyor |
 | 2026-06-19 | — | reporter.py: print_stress_test'ten mükerrer NAV/AUM/yatırımcı satırları çıkarıldı (print_fund_health ile çakışıyordu) |
