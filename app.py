@@ -28,6 +28,7 @@ from money_flow import (
     export_to_excel, current_month_highlight,
 )
 from rotation_tracker import analyze_rotation
+from reporter import compute_net_portfolio_effect
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -265,6 +266,63 @@ with col4:
 with col5:
     st.metric("Hisse Değeri (Gün 0)", f"{sim['daily_equity_values'][0]:,.0f} ₺",
               help="Verilen anaparanın hisse senedine yatırılmış kısmının bugünkü değeri.")
+
+# ---------------------------------------------------------------------------
+# Net Portföy Etkisi — Büyük Metrik Kutusu
+# ---------------------------------------------------------------------------
+net_effect = compute_net_portfolio_effect(analysis["per_stock"])
+has_large_moves = any(
+    abs(d.get("change_pct") or 0) >= 5.0
+    for d in analysis["per_stock"].values()
+    if not d.get("is_fund")
+)
+
+st.markdown("---")
+
+# Ana metrik kutusu
+if net_effect > 0:
+    net_color = "#27ae60"
+    net_icon = "📈"
+    net_sign = "+"
+elif net_effect < 0:
+    net_color = "#e74c3c"
+    net_icon = "📉"
+    net_sign = "-"
+else:
+    net_color = "#95a5a6"
+    net_icon = "➖"
+    net_sign = ""
+
+st.markdown(f"""
+<div style="
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border: 2px solid {net_color};
+    border-radius: 16px;
+    padding: 1.5rem 2rem;
+    margin: 0.5rem 0 1rem 0;
+    text-align: center;
+">
+    <div style="font-size: 0.85rem; color: #888; margin-bottom: 0.3rem; letter-spacing: 1px;">
+        BUGÜNKÜ NET ETKİ
+    </div>
+    <div style="font-size: 2.8rem; font-weight: 800; color: {net_color}; line-height: 1.1;">
+        {net_icon} {net_sign}%{abs(net_effect):.2f}
+    </div>
+    <div style="font-size: 0.85rem; color: #888; margin-top: 0.3rem;">
+        Hisse portföyünün ağırlıklı ortalama günlük değişimi
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Yorum satiri
+if net_effect < -3.0:
+    st.error(f"🚨 GERÇEK KAYIP: Rotasyon riski dengeleyemedi, bugün net -%{abs(net_effect):.2f} kayıp")
+elif abs(net_effect) <= 1.0 and has_large_moves:
+    st.info(f"ℹ️ Rotasyon dengelemesi: Büyük hareketler birbirini nötrledi (net %{net_effect:+.2f})")
+elif net_effect > 0:
+    st.success(f"Hisseler arası hareketler birbirini dengeledi, net etki pozitif (%{net_effect:+.2f})")
+else:
+    st.warning(f"Hisseler arası hareketler birbirini dengeledi, net etki negatif (%{net_effect:+.2f})")
 
 # ---------------------------------------------------------------------------
 # Risk tablosu

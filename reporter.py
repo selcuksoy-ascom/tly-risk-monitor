@@ -109,6 +109,80 @@ def print_header(report_date: Optional[date] = None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Net Portföy Etkisi Hesaplama
+# ---------------------------------------------------------------------------
+
+NET_EFFECT_CRITICAL_THRESHOLD = -3.0
+NET_EFFECT_LARGE_MOVE_THRESHOLD = 5.0   # tek hisse %5+ hareket = "buyuk hareket"
+
+
+def compute_net_portfolio_effect(per_stock: Dict[str, Dict[str, Any]]) -> float:
+    """Agirlikli ortalama gunluk degisimi hesaplar (fon tipi varliklar haric).
+
+    Her hissenin agirligi x gunluk degisim yuzdesi carpilir, toplanir.
+    Bu, fonun hisse portfoyunun BUGUN gercekte ne kadar degistigini gosterir.
+    """
+    total_weight = 0.0
+    weighted_change = 0.0
+
+    for ticker, data in per_stock.items():
+        if data.get("is_fund"):
+            continue
+        weight = data.get("weight", 0.0)
+        change_pct = data.get("change_pct")
+        if change_pct is None:
+            continue
+        weighted_change += weight * change_pct
+        total_weight += weight
+
+    if total_weight == 0:
+        return 0.0
+
+    return weighted_change / 100.0  # %1 agirlik x %5 degisim = 0.05 puan
+
+
+def _has_large_moves(per_stock: Dict[str, Dict[str, Any]]) -> bool:
+    """En az bir hissede |%5|+ gunluk hareket var mi?"""
+    for ticker, data in per_stock.items():
+        if data.get("is_fund"):
+            continue
+        change_pct = data.get("change_pct")
+        if change_pct is not None and abs(change_pct) >= NET_EFFECT_LARGE_MOVE_THRESHOLD:
+            return True
+    return False
+
+
+def print_net_portfolio_effect(per_stock: Dict[str, Dict[str, Any]]) -> None:
+    """Net portfoy etkisini terminal raporuna yazdirir."""
+    net_effect = compute_net_portfolio_effect(per_stock)
+    has_large = _has_large_moves(per_stock)
+
+    print()
+    print(C_WHITE + "[ NET PORTFOY ETKISI - BUGUN ]" + C_RESET)
+
+    # Renkli deger
+    if net_effect > 0:
+        effect_str = C_GREEN + f"+%{net_effect:.2f}" + C_RESET
+    elif net_effect < 0:
+        effect_str = C_RED + f"-%{abs(net_effect):.2f}" + C_RESET
+    else:
+        effect_str = f"%{net_effect:.2f}"
+
+    print(f"  Agirlikli Ortalama Degisim: {effect_str}")
+
+    # Yorum
+    if net_effect < NET_EFFECT_CRITICAL_THRESHOLD:
+        print()
+        print(C_RED + f"  GERCEK KAYIP: Rotasyon riski dengeleyemedi, bugun net -%{abs(net_effect):.2f} kayip" + C_RESET)
+    elif abs(net_effect) <= 1.0 and has_large:
+        print(f"  " + C_CYAN + "Rotasyon dengelemesi: Buyuk hareketler birbirini notrledi" + C_RESET)
+    elif net_effect > 0:
+        print(f"  Hisse portfoyu bugun pozitif etkide.")
+    else:
+        print(f"  Hisse portfoyu bugun negatif etkide, ancak esik altinda.")
+
+
+# ---------------------------------------------------------------------------
 # Risk Skoru Tablosu
 # ---------------------------------------------------------------------------
 

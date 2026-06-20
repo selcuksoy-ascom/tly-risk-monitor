@@ -134,6 +134,7 @@ def main() -> None:
     # ----- ADIM 9: Raporu yazdır -----
     from reporter import (
         print_header,
+        print_net_portfolio_effect,
         print_risk_table,
         print_systemic_risk,
         print_simulation,
@@ -145,6 +146,7 @@ def main() -> None:
     )
 
     print_header(report_date=date.today())
+    print_net_portfolio_effect(analysis["per_stock"])
     print_risk_table(analysis["per_stock"])
     print_systemic_risk(analysis["systemic"])
     print_fund_health(fund_health)
