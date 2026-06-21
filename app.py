@@ -528,8 +528,9 @@ else:
 st.markdown("---")
 st.markdown("### 🧪 Stres Testi & Fon Sağlığı")
 
-# Stres testi: tam gecmis veriyle (tefas_full varsa)
-stress = analyze_stress_test(df_history=tefas_full if tefas_full is not None else None)
+# Stres testi: tam gecmis veriyle cek (cache'li, hizli mod yeterli)
+tefas_full_raw = fetch_tefas_data(fast_mode=True)
+stress = analyze_stress_test(df_history=tefas_full_raw if tefas_full_raw is not None else None)
 
 if stress is None:
     st.caption("Stres testi verisi şu anda çekilemiyor (TEFAS veya Fonoloji erişilemez).")
