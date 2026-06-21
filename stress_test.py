@@ -60,7 +60,7 @@ def _fetch_tefas_data(days: int = HISTORY_DAYS) -> Optional[pd.DataFrame]:
 
 
 def fetch_holdings() -> Optional[Dict[str, Any]]:
-    """Fonoloji API'den TLY holdings verisini ceker."""
+    """Fonoloji API'den TLY holdings verisini ceker. 3 deneme yapar."""
     try:
         from config import FONOLOJI_API_KEY
     except ImportError:
@@ -69,16 +69,86 @@ def fetch_holdings() -> Optional[Dict[str, Any]]:
     if not FONOLOJI_API_KEY:
         return None
 
+    import sys
+    import time
+
+    url = "https://fonoloji.com/v1/funds/TLY/holdings"
+    last_error = None
+
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url)
+            req.add_header("X-API-Key", FONOLOJI_API_KEY)
+            req.add_header("User-Agent", "Mozilla/5.0")
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            last_error = e
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+
+    print(f"[stress_test] Fonoloji API hatasi (3 deneme): {type(last_error).__name__}: {last_error}", file=sys.stderr)
+    return None
+
+
+def _scrape_cash_from_public() -> Optional[float]:
+    """Fonoloji public sayfasindan Nakit/Mevduat oranini scrape eder (API fallback)."""
+    import re
     try:
-        url = "https://fonoloji.com/v1/funds/TLY/holdings"
+        url = "https://fonoloji.com/fon/TLY"
         req = urllib.request.Request(url)
-        req.add_header("X-API-Key", FONOLOJI_API_KEY)
-        req.add_header("User-Agent", "Mozilla/5.0")
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception as e:
-        import sys
-        print(f"[stress_test] Fonoloji API hatasi: {type(e).__name__}: {e}", file=sys.stderr)
+        req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            html = resp.read().decode("utf-8")
+
+        # Yontem 1: __NEXT_DATA__ JSON blob'u
+        m = re.search(r'<script\s+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+        if m:
+            try:
+                import json as _json
+                data = _json.loads(m.group(1))
+                fund_data = None
+                # Derin arama: composition / holdings icinde nakit orani
+                def _deep_search(obj):
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            if isinstance(v, (dict, list)):
+                                result = _deep_search(v)
+                                if result is not None:
+                                    return result
+                        # composition listesi varsa
+                        comp = obj.get('composition') or obj.get('assetAllocation') or []
+                        if isinstance(comp, list):
+                            for item in comp:
+                                if isinstance(item, dict):
+                                    name = item.get('name', item.get('label', item.get('type', '')))
+                                    if isinstance(name, str) and ('nakit' in name.lower() or 'mevduat' in name.lower()):
+                                        return float(item.get('ratio', item.get('percentage', item.get('value', 0))))
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            result = _deep_search(item)
+                            if result is not None:
+                                return result
+                    return None
+                result = _deep_search(data)
+                if result is not None:
+                    return result
+            except Exception:
+                pass
+
+        # Yontem 2: Regex ile "Nakit / Mevduat" satirini bul
+        m = re.search(r'Nakit\s*/\s*Mevduat[^%]*%(\d+[.,]\d+)', html)
+        if m:
+            return float(m.group(1).replace(',', '.'))
+
+        # Yontem 3: Varlik dagilimi tablosunu regex ile tara
+        for m in re.finditer(r'([\w\s/]+)\s+%(\d+[.,]\d+)', html):
+            name = m.group(1).strip().lower()
+            if 'nakit' in name or 'mevduat' in name:
+                return float(m.group(2).replace(',', '.'))
+
+        return None
+    except Exception:
         return None
 
 
@@ -367,15 +437,23 @@ def analyze_stress_test(
 
         # ---- Fonoloji holdings cek ----
         fonoloji_error = None
+        repo_ratio = None
         fonoloji_data = holdings if holdings is not None else fetch_holdings()
-        if fonoloji_data is None:
-            fonoloji_error = "Fonoloji API yanit vermedi"
-            repo_ratio = None
-        else:
+
+        if fonoloji_data is not None:
             repo_ratio = _calc_repo_ratio(fonoloji_data)
             if repo_ratio is None:
                 keys = list(fonoloji_data.keys()) if isinstance(fonoloji_data, dict) else []
                 fonoloji_error = f"_calc_repo_ratio None, data keys: {keys}"
+
+        if repo_ratio is None:
+            # API basarisizsa public sayfadan Nakit/Mevduat oranini scrape et
+            scraped = _scrape_cash_from_public()
+            if scraped is not None:
+                repo_ratio = scraped
+                fonoloji_error = None
+            elif fonoloji_data is None:
+                fonoloji_error = "Fonoloji API yanit vermedi"
 
         # ---- Hesaplamalar ----
         cash_buffer = None
