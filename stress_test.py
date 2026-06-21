@@ -570,7 +570,9 @@ def analyze_stress_test(
         scraped = _scrape_fonoloji_public()
         repo_ratio = scraped.get("cash_ratio")
         if repo_ratio is None:
-            fonoloji_error = "Public sayfada nakit/m mevduat orani bulunamadi"
+            src = scraped.get("_source", "?")
+            alloc = scraped.get("asset_allocation", {})
+            fonoloji_error = f"Public sayfada nakit/mevduat orani bulunamadi (source={src}, alloc_keys={list(alloc.keys())[:5]})"
 
         # ---- Hesaplamalar ----
         cash_buffer = None
