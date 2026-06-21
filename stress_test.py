@@ -59,7 +59,7 @@ def _fetch_tefas_data(days: int = HISTORY_DAYS) -> Optional[pd.DataFrame]:
         return None
 
 
-def _fetch_holdings() -> Optional[Dict[str, Any]]:
+def fetch_holdings() -> Optional[Dict[str, Any]]:
     """Fonoloji API'den TLY holdings verisini ceker."""
     try:
         from config import FONOLOJI_API_KEY
@@ -365,7 +365,7 @@ def analyze_stress_test(
                     daily_aum_change_pct = round(float(aum_changes.iloc[-1]) * 100.0, 4)
 
         # ---- Fonoloji holdings cek ----
-        fonoloji_data = holdings if holdings is not None else _fetch_holdings()
+        fonoloji_data = holdings if holdings is not None else fetch_holdings()
         repo_ratio = _calc_repo_ratio(fonoloji_data) if fonoloji_data else None
 
         # ---- Hesaplamalar ----

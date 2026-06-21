@@ -22,7 +22,7 @@ from data_fetcher import fetch_all_portfolio_data
 from risk_analyzer import analyze_portfolio
 from simulator import run_simulation
 from tefas_fetcher import analyze_fund_health
-from stress_test import analyze_stress_test
+from stress_test import analyze_stress_test, fetch_holdings
 from summary_generator import generate_daily_summary
 from money_flow import (
     fetch_full_history, analyze_money_flow,
@@ -87,8 +87,7 @@ def fetch_rotation_data():
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_fonoloji_holdings_cached():
     """Fonoloji holdings verisini ceker, 1 saat cache'ler."""
-    from stress_test import _fetch_holdings
-    return _fetch_holdings()
+    return fetch_holdings()
 
 
 # ---------------------------------------------------------------------------
