@@ -225,9 +225,15 @@ def check_thin_market(
 
 def analyze_portfolio(
     portfolio_data: Dict[str, Dict[str, Any]],
+    fund_health: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Tüm portföyü analiz eder, her hisse için risk durumunu döndürür.
+
+    Args:
+        portfolio_data: fetch_all_portfolio_data() ciktisi
+        fund_health: Opsiyonel, tefas_fetcher.analyze_fund_health() ciktisi.
+                     Sessiz cokus tespiti icin kullanilir.
 
     Returns:
         {
@@ -347,6 +353,63 @@ def analyze_portfolio(
         "message": systemic_msg,
         "tickers": GROUP_TICKERS,
     }
+
+    # ----- KOMBINASYON KURALI A: CIFT LIKIDITE KILIDI -----
+    ozatd = per_stock.get("OZATD.IS", {})
+    dstkf = per_stock.get("DSTKF.IS", {})
+    if not ozatd.get("is_fund") and not dstkf.get("is_fund"):
+        ozatd_vol = ozatd.get("volume_ratio")
+        dstkf_vol = dstkf.get("volume_ratio")
+        if ozatd_vol is not None and dstkf_vol is not None:
+            if ozatd_vol < 20.0 and dstkf_vol < 50.0:
+                alert = "🚨 ÇİFT LİKİDİTE KİLİDİ: OZATD ve DSTKF eşzamanlı hacim düşüşü"
+                critical_alerts.append(alert)
+
+    # ----- KOMBINASYON KURALI B: GRUP SARMALI -----
+    # TERA+TRHOL+TEHOL ucu de -%3 altinda VE korelasyon > 0.80
+    group_all_below_3 = True
+    for t in GROUP_TICKERS:
+        chg = per_stock.get(t, {}).get("change_pct")
+        if chg is None or chg >= -3.0:
+            group_all_below_3 = False
+            break
+
+    corr_value = systemic_result.get("correlation")
+    if group_all_below_3 and corr_value is not None and corr_value > CORRELATION_THRESHOLD:
+        alert = "🚨 GRUP SARMALI BAŞLADI: TERA, TRHOL, TEHOL eşzamanlı sert düşüş + yüksek korelasyon"
+        if alert not in critical_alerts:
+            critical_alerts.append(alert)
+
+    # ----- KOMBINASYON KURALI C: SESSIZ COKUS -----
+    # NAV 3 gun art arda dustu VE yatirimci azaliyor VE hisse hacimleri normal
+    if fund_health is not None:
+        nav_down = False
+        fh_warnings = fund_health.get("warnings", [])
+        for w in fh_warnings:
+            if "art arda" in w.lower() or "değer kaybediyor" in w.lower():
+                nav_down = True
+                break
+        # Alternatif: NAV trend asagi ve son 5 gun dustu uyarisi varsa
+        if not nav_down:
+            fh_trend = fund_health.get("trend", "")
+            if fh_trend == "down":
+                nav_down = True
+
+        inv_decreasing = False
+        inv_change = fund_health.get("investor_change_7d")
+        if inv_change is not None and inv_change < 0:
+            inv_decreasing = True
+
+        # Hisse hacimleri normal mi? (kritik veya sig piyasa yok)
+        volumes_normal = (
+            len(critical_alerts) == 0 and
+            len(thin_market_alerts) == 0
+        )
+
+        if nav_down and inv_decreasing and volumes_normal:
+            thin_market_alerts.append(
+                "⚠️ SESSİZ ÇÖKÜŞ: Görünürde alarm yok ama fon değer kaybediyor"
+            )
 
     return {
         "per_stock": per_stock,

@@ -2,7 +2,7 @@
 # config.py - TLY Portföy Sabitleri
 # =============================================================================
 # KULLANIM: Her ay KAP raporuna göre ağırlıkları güncelleyin.
-# Son güncelleme: 8 Haziran 2026
+# Son güncelleme: 20 Haziran 2026
 # =============================================================================
 
 PORTFOLIO = {
@@ -10,42 +10,84 @@ PORTFOLIO = {
         "name": "Destek Faktoring",
         "weight": 17.71,
         "category": "anchor",
-        "prev_weight": 17.71,  # Önceki aya ait ağırlık (rotasyon tespiti için)
+        "prev_weight": 23.60,
     },
     "OZATD.IS": {
         "name": "Ozata Denizcilik",
         "weight": 17.16,
         "category": "anchor",
-        "prev_weight": 17.16,
+        "prev_weight": 1.29,
     },
     "TERA.IS": {
         "name": "Tera Yatirim",
         "weight": 11.50,
         "category": "group",
-        "prev_weight": 11.50,
+        "prev_weight": 12.86,
     },
     "PEKGY.IS": {
         "name": "Peker GYO",
         "weight": 9.89,
-        "category": "fund",  # GYF — hacim bazlı likidite kuralları uygulanmaz
-        "prev_weight": 9.89,
+        "category": "anchor",
+        "prev_weight": 8.51,
     },
     "TRHOL.IS": {
         "name": "Tera Finansal",
         "weight": 6.59,
         "category": "group",
-        "prev_weight": 6.59,
+        "prev_weight": 5.98,
     },
     "TEHOL.IS": {
         "name": "Tera Teknoloji",
         "weight": 5.50,
         "category": "group",
-        "prev_weight": 5.50,
+        "prev_weight": 2.25,
+    },
+    "ANELE.IS": {
+        "name": "Anel Elektrik",
+        "weight": 2.15,
+        "category": "anchor",
+        "prev_weight": 2.15,
+    },
+    "ALKLC.IS": {
+        "name": "Altinkilic Gida",
+        "weight": 0.66,
+        "category": "anchor",
+        "prev_weight": 0.70,
+    },
+    "SVGYO.IS": {
+        "name": "Savur GYO",
+        "weight": 0.55,
+        "category": "anchor",
+        "prev_weight": 0.32,
+    },
+    "TMPOL.IS": {
+        "name": "Temapol Polimer",
+        "weight": 0.33,
+        "category": "anchor",
+        "prev_weight": 0.40,
+    },
+    "HEDEF.IS": {
+        "name": "Hedef Holding",
+        "weight": 0.28,
+        "category": "anchor",
+        "prev_weight": 0.32,
+    },
+    "CWENE.IS": {
+        "name": "CW Enerji",
+        "weight": 0.03,
+        "category": "anchor",
+        "prev_weight": 0.07,
+    },
+    "EUPWR.IS": {
+        "name": "Europower Enerji",
+        "weight": 0.03,
+        "category": "anchor",
+        "prev_weight": 0.03,
     },
 }
 
 # Fonun toplam hisse oranı (%), geri kalan nakit/tahvil gibi sabit varlıklardır
-EQUITY_RATIO = 71.54
+EQUITY_RATIO = 72.38
 
 # Varsayılan sermaye (TL)
 DEFAULT_CAPITAL = 500_000
@@ -75,4 +117,4 @@ PRICE_DROP_THRESHOLD = -5.0
 HISTORY_DAYS = 30
 
 # Fonoloji API anahtarı (https://fonoloji.com)
-FONOLOJI_API_KEY = ""
+FONOLOJI_API_KEY = "fon_PT3alvQwy3575dlOUTvytHigzFKyBJnF"
