@@ -149,7 +149,26 @@ def fetch_all_portfolio_data(portfolio: dict) -> Dict[str, Dict[str, Any]]:
     print("\n  Piyasa verisi çekiliyor...")
 
     for ticker, info in portfolio.items():
-        print(f"  → {ticker} ({info['name']})...", end=" ", flush=True)
+        print(f"  -> {ticker} ({info['name']})...", end=" ", flush=True)
+
+        # Fon/GYF tipi varlıklar için yfinance verisi çekme
+        if info.get("category") == "fund":
+            results[ticker] = {
+                "ticker": ticker,
+                "price": None,
+                "change_pct": None,
+                "volume": None,
+                "avg_volume": None,
+                "history": None,
+                "weight": info["weight"],
+                "prev_weight": info.get("prev_weight", info["weight"]),
+                "name": info["name"],
+                "category": info["category"],
+                "error": False,
+                "is_fund": True,
+            }
+            print("FON")
+            continue
 
         stock_data = fetch_stock_data(ticker)
         avg_vol = get_avg_volume(ticker, days=30)

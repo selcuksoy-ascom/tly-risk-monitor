@@ -11,15 +11,15 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
-import pandas as pd
 from datetime import date, datetime
 from config import (
     PORTFOLIO, EQUITY_RATIO, DEFAULT_CAPITAL, PANIC_RATE,
-    GROUP_TICKERS, CORRELATION_THRESHOLD, HISTORY_DAYS,
+    GROUP_TICKERS, CORRELATION_THRESHOLD,
 )
 from data_fetcher import fetch_all_portfolio_data
 from risk_analyzer import analyze_portfolio
 from simulator import run_simulation
+from tefas_fetcher import analyze_fund_health
 
 # ---------------------------------------------------------------------------
 # Sayfa yapılandırması
@@ -39,10 +39,15 @@ st.markdown("""
     .main-header { font-size: 2rem; font-weight: 700; color: #1a73e8; margin-bottom: 0; }
     .sub-header  { font-size: 0.95rem; color: #5f6368; margin-top: 0; }
     .metric-card { background: #f8f9fa; border-radius: 12px; padding: 1rem; text-align: center; }
-    .critical-row { background: #fce8e6 !important; }
-    .rotation-row { background: #e8f5e9 !important; }
-    .warning-row  { background: #fef7e0 !important; }
     hr { margin: 0.5rem 0; }
+    .risk-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .risk-table th { color: #AAAAAA; text-align: left; padding: 8px 10px; border-bottom: 1px solid #333; font-weight: 600; }
+    .risk-table td { padding: 6px 10px; border-bottom: 1px solid #2A2A2A; }
+    .row-normal  td { background: #1E1E1E; color: #FFFFFF !important; }
+    .row-warning td { background: #3D2B00; color: #FFD700 !important; }
+    .row-fund    td { background: #0D2137; color: #60B4FF !important; }
+    .row-critical td { background: #3D0000; color: #FF6B6B !important; }
+    .row-error   td { background: #1E1E1E; color: #888888 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -161,7 +166,28 @@ with col5:
 st.markdown("---")
 st.markdown("### 📋 Risk Skoru Tablosu")
 
-rows = []
+# Satır tipine göre CSS class'ı belirle
+def _row_class(is_critical, is_rotation, is_thin, is_fund, is_error):
+    if is_critical:
+        return "row-critical"
+    elif is_rotation:
+        return "row-critical"  # rotasyon kritik değil ama yine de dikkat çekici
+    elif is_thin:
+        return "row-warning"
+    elif is_fund:
+        return "row-fund"
+    elif is_error:
+        return "row-error"
+    else:
+        return "row-normal"
+
+headers = ["Hisse", "Ad", "Ağırlık", "Fiyat (₺)", "Değişim", "Hacim/Ort", "Durum"]
+
+html = '<table class="risk-table"><thead><tr>'
+for h in headers:
+    html += f"<th>{h}</th>"
+html += "</tr></thead><tbody>"
+
 for ticker, data in analysis["per_stock"].items():
     short = ticker.replace(".IS", "")
     name = data.get("name", "?")
@@ -172,54 +198,42 @@ for ticker, data in analysis["per_stock"].items():
     liq_status = data.get("liquidity_status", "Normal")
     is_critical = data.get("is_critical", False)
     is_rotation = data.get("is_rotation", False)
+    is_thin = data.get("is_thin_market", False)
+    is_fund = data.get("is_fund", False)
+    is_error = data.get("error", False)
 
-    price_str = f"{price:,.4f}" if price is not None else "—"
-    change_str = f"{change_pct:+.2f}%" if change_pct is not None else "—"
-    vol_str = f"%{vol_ratio:.0f}" if vol_ratio is not None else "—"
+    price_str = f"{price:,.4f}" if price is not None else ("---" if is_fund else "—")
+    change_str = f"{change_pct:+.2f}%" if change_pct is not None else ("---" if is_fund else "—")
+    vol_str = f"%{vol_ratio:.0f}" if vol_ratio is not None else ("---" if is_fund else "—")
 
-    # Durum emojisi
     if is_critical:
         status_icon = "🔴"
     elif is_rotation:
         status_icon = "🔵"
-    elif data.get("error"):
+    elif is_thin:
+        status_icon = "🟡"
+    elif is_fund:
+        status_icon = "🔷"
+    elif is_error:
         status_icon = "⚫"
     else:
         status_icon = "🟢"
 
-    rows.append({
-        "Hisse": short,
-        "Ad": name,
-        "Ağırlık": f"%{weight:.2f}",
-        "Fiyat (₺)": price_str,
-        "Değişim": change_str,
-        "Hacim/Ort": vol_str,
-        "Durum": f"{status_icon} {liq_status}",
-        "_critical": is_critical,
-        "_rotation": is_rotation,
-        "_change": change_pct or 0,
-        "_error": data.get("error", False),
-    })
+    css_class = _row_class(is_critical, is_rotation, is_thin, is_fund, is_error)
 
-df = pd.DataFrame(rows)
+    html += f'<tr class="{css_class}">'
+    html += f"<td>{short}</td>"
+    html += f"<td>{name}</td>"
+    html += f"<td>%{weight:.2f}</td>"
+    html += f"<td>{price_str}</td>"
+    html += f"<td>{change_str}</td>"
+    html += f"<td>{vol_str}</td>"
+    html += f"<td>{status_icon} {liq_status}</td>"
+    html += "</tr>"
 
+html += "</tbody></table>"
 
-def highlight_rows(row):
-    if row["_critical"]:
-        return ["background-color: #fce8e6"] * len(row)
-    if row["_rotation"]:
-        return ["background-color: #e8f5e9"] * len(row)
-    if row["_error"]:
-        return ["background-color: #f1f3f4"] * len(row)
-    if row["_change"] < 0:
-        return ["background-color: #fef7e0"] * len(row)
-    return [""] * len(row)
-
-
-display_cols = ["Hisse", "Ad", "Ağırlık", "Fiyat (₺)", "Değişim", "Hacim/Ort", "Durum"]
-styled = df[display_cols].style.apply(highlight_rows, axis=1)
-
-st.dataframe(styled, use_container_width=True, hide_index=True, height=(len(rows) + 1) * 38)
+st.markdown(html, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Sistemik Risk
@@ -247,7 +261,10 @@ with col_a:
 
 with col_b:
     if corr is not None:
-        st.progress(min(corr / 1.0, 1.0), text=f"Korelasyon: {corr:.2f}")
+        import math
+        safe_corr = corr if (isinstance(corr, (int, float)) and not math.isnan(corr)) else 0.0
+        clamped = max(0.0, min(1.0, safe_corr))
+        st.progress(clamped, text=f"Korelasyon: {safe_corr:.2f}")
     if s["is_critical"]:
         st.error("⚠️ KRİTİK: Döngüsel sermaye yapısında bozulma!")
     elif corr and corr > CORRELATION_THRESHOLD:
@@ -299,14 +316,74 @@ st.markdown("### 🚨 Uyarılar & Loglar")
 
 critical_alerts = analysis.get("critical_alerts", [])
 rotation_logs = analysis.get("rotation_logs", [])
+thin_market_alerts = analysis.get("thin_market_alerts", [])
 
-if not critical_alerts and not rotation_logs:
+if not critical_alerts and not rotation_logs and not thin_market_alerts:
     st.success("✅ Bugün için kritik uyarı yok.")
 else:
     for alert in critical_alerts:
         st.error(f"🔴 {alert}")
+    for alert in thin_market_alerts:
+        st.warning(f"🟡 {alert}")
     for log in rotation_logs:
         st.info(f"🔵 {log}")
+
+# ---------------------------------------------------------------------------
+# Fon Sağlığı (TEFAS)
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.markdown("### 🏥 Fon Sağlığı (TEFAS)")
+
+fund_health = analyze_fund_health()
+
+if fund_health is None:
+    st.caption("TEFAS verisi şu anda çekilemiyor.")
+else:
+    nav = fund_health.get("nav")
+    nav_change = fund_health.get("nav_change")
+    aum = fund_health.get("aum")
+    aum_change_7d = fund_health.get("aum_change_7d")
+    inv = fund_health.get("investor_count")
+    inv_change_7d = fund_health.get("investor_change_7d")
+    trend = fund_health.get("trend", "flat")
+
+    fc1, fc2, fc3 = st.columns(3)
+
+    with fc1:
+        if nav is not None:
+            delta_str = f"{nav_change:+.2f}%" if nav_change is not None else None
+            st.metric("NAV Fiyatı", f"{nav:,.4f} ₺", delta=delta_str)
+        else:
+            st.metric("NAV Fiyatı", "Veri yok")
+
+    with fc2:
+        if aum is not None:
+            aum_display = f"{aum/1e9:.1f} milyar ₺"
+            delta_str = f"{aum_change_7d:+.1f}% haftalık" if aum_change_7d is not None else None
+            st.metric("Fon Büyüklüğü", aum_display, delta=delta_str,
+                      delta_color="normal" if (aum_change_7d is None or aum_change_7d >= 0) else "inverse")
+        else:
+            st.metric("Fon Büyüklüğü", "Veri yok")
+
+    with fc3:
+        if inv is not None:
+            inv_display = f"{inv:,}"
+            delta_str = f"{inv_change_7d:+.0f} haftalık" if inv_change_7d is not None else None
+            st.metric("Yatırımcı Sayısı", inv_display, delta=delta_str,
+                      delta_color="normal" if (inv_change_7d is None or inv_change_7d >= 0) else "inverse")
+        else:
+            st.metric("Yatırımcı Sayısı", "Veri yok")
+
+    # Trend satırı
+    trend_icon = {"up": "↗ Büyüyor", "down": "↘ Daralıyor", "flat": "→ Yatay"}
+    st.caption(f"**30G Trend:** {trend_icon.get(trend, trend)}")
+
+    # Uyarılar
+    for w in fund_health.get("warnings", []):
+        if "KRİTİK" in w:
+            st.error(w)
+        else:
+            st.warning(w)
 
 # ---------------------------------------------------------------------------
 # Alt bilgi
