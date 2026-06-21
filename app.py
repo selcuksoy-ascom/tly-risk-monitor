@@ -22,7 +22,7 @@ from data_fetcher import fetch_all_portfolio_data
 from risk_analyzer import analyze_portfolio
 from simulator import run_simulation
 from tefas_fetcher import analyze_fund_health
-from stress_test import analyze_stress_test, fetch_holdings
+from stress_test import analyze_stress_test
 from summary_generator import generate_daily_summary
 from money_flow import (
     fetch_full_history, analyze_money_flow,
@@ -83,11 +83,6 @@ def fetch_rotation_data():
     """Rotasyon analizi verisini ceker, 1 saat cache'ler."""
     return analyze_rotation()
 
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_fonoloji_holdings_cached():
-    """Fonoloji holdings verisini ceker, 1 saat cache'ler."""
-    return fetch_holdings()
 
 
 # ---------------------------------------------------------------------------
@@ -237,12 +232,9 @@ analysis = analyze_portfolio(portfolio_data, fund_health=fund_health)
 sim = run_simulation(capital=capital, equity_ratio=equity_ratio, panic_rate=panic_rate)
 
 # Stres testi ve rotasyon (erken hesapla, ozet icin gerekli)
-# Tek seferde cek: once TEFAS gecmisi, sonra stress_test (Fonoloji API dahil)
 tefas_full_raw = fetch_tefas_data(fast_mode=True)
-fonoloji_holdings = fetch_fonoloji_holdings_cached()
 stress = analyze_stress_test(
     df_history=tefas_full_raw if tefas_full_raw is not None else None,
-    holdings=fonoloji_holdings,
 )
 rotation = fetch_rotation_data()
 
