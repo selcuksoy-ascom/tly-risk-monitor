@@ -78,11 +78,10 @@ def fetch_tefas_data(fast_mode=True):
     return fetch_full_history(fast_mode=fast_mode)
 
 
-@st.cache_data(ttl=3600, show_spinner="📡 Fonoloji holdings geçmişi yükleniyor...")
+@st.cache_data(ttl=3600, show_spinner="📡 Rotasyon verisi yukleniyor...")
 def fetch_rotation_data():
     """Rotasyon analizi verisini ceker, 1 saat cache'ler."""
     return analyze_rotation()
-
 
 
 # ---------------------------------------------------------------------------

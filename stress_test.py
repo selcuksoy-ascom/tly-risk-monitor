@@ -1,9 +1,10 @@
 # =============================================================================
 # stress_test.py - Kapsamli Stres Testi & Fon Sagligi Modulu
 # =============================================================================
-# TEFAS tam gecmis verisi + Fonoloji holdings ile nakit tamponu, yatirimci
-# kacisi, AUM erimesi, NAV trendi, konsantrasyon riski ve birlesik stres
-# analizi yapar.
+# TEFAS tam gecmis verisi + Fonoloji public sayfa scrape ile nakit tamponu,
+# yatirimci kacisi, AUM erimesi, NAV trendi, konsantrasyon riski ve birlesik
+# stres analizi yapar.
+# API anahtari gerektirmez, public sayfadan veri kazir.
 # Hata durumunda sessizce None doner, diger moduller etkilenmez.
 # =============================================================================
 
@@ -11,6 +12,9 @@ from datetime import date, timedelta
 from typing import Optional, Dict, Any
 import urllib.request
 import json
+import re
+import sys
+import time
 
 import pandas as pd
 import numpy as np
@@ -59,143 +63,287 @@ def _fetch_tefas_data(days: int = HISTORY_DAYS) -> Optional[pd.DataFrame]:
         return None
 
 
-def fetch_holdings() -> Optional[Dict[str, Any]]:
-    """Fonoloji API'den TLY holdings verisini ceker. 3 deneme yapar."""
-    try:
-        from config import FONOLOJI_API_KEY
-    except ImportError:
-        return None
+def _scrape_fonoloji_public() -> Dict[str, Any]:
+    """Fonoloji public sayfasindan tum erisilebilir metrikleri kazir (API gerektirmez).
 
-    if not FONOLOJI_API_KEY:
-        return None
+    Returns:
+        Dict: {'cash_ratio': float|None, 'equity_ratio': float|None,
+               'nav': float|None, 'aum_milyar': float|None,
+               'investor_count': int|None, 'nav_change_pct': float|None,
+               'aum_change_pct': float|None, 'investor_change': int|None,
+               'volatility_90d': float|None, 'max_drawdown_1y': float|None,
+               'sharpe_90d': float|None, 'beta_1y': float|None,
+               'risk_score': str|None,  # "7/7"
+               'returns': {'1m': float|None, '3m': float|None, '6m': float|None, '1y': float|None},
+               'asset_allocation': {'Hisse Senedi': float|None, ...},
+               'stress_events': list[dict]|None,  # public sayfadan parse edilirse
+               '_source': str,  # 'next_data_json', 'regex'
+              }
+    """
+    result = {
+        "cash_ratio": None,
+        "equity_ratio": None,
+        "nav": None,
+        "aum_milyar": None,
+        "investor_count": None,
+        "nav_change_pct": None,
+        "aum_change_pct": None,
+        "investor_change": None,
+        "volatility_90d": None,
+        "max_drawdown_1y": None,
+        "sharpe_90d": None,
+        "beta_1y": None,
+        "risk_score": None,
+        "returns": {"1m": None, "3m": None, "6m": None, "1y": None},
+        "asset_allocation": {},
+        "stress_events": None,
+        "_source": "none",
+    }
 
-    import sys
-    import time
-
-    url = "https://fonoloji.com/v1/funds/TLY/holdings"
-    last_error = None
-
-    for attempt in range(3):
-        try:
-            req = urllib.request.Request(url)
-            req.add_header("X-API-Key", FONOLOJI_API_KEY)
-            req.add_header("User-Agent", "Mozilla/5.0")
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except Exception as e:
-            last_error = e
-            if attempt < 2:
-                time.sleep(2 ** attempt)
-
-    print(f"[stress_test] Fonoloji API hatasi (3 deneme): {type(last_error).__name__}: {last_error}", file=sys.stderr)
-    return None
-
-
-def _scrape_cash_from_public() -> Optional[float]:
-    """Fonoloji public sayfasindan Nakit/Mevduat oranini scrape eder (API fallback)."""
-    import re
     try:
         url = "https://fonoloji.com/fon/TLY"
         req = urllib.request.Request(url)
-        req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         with urllib.request.urlopen(req, timeout=20) as resp:
             html = resp.read().decode("utf-8")
-
-        # Yontem 1: __NEXT_DATA__ JSON blob'u
-        m = re.search(r'<script\s+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
-        if m:
-            try:
-                import json as _json
-                data = _json.loads(m.group(1))
-                fund_data = None
-                # Derin arama: composition / holdings icinde nakit orani
-                def _deep_search(obj):
-                    if isinstance(obj, dict):
-                        for k, v in obj.items():
-                            if isinstance(v, (dict, list)):
-                                result = _deep_search(v)
-                                if result is not None:
-                                    return result
-                        # composition listesi varsa
-                        comp = obj.get('composition') or obj.get('assetAllocation') or []
-                        if isinstance(comp, list):
-                            for item in comp:
-                                if isinstance(item, dict):
-                                    name = item.get('name', item.get('label', item.get('type', '')))
-                                    if isinstance(name, str) and ('nakit' in name.lower() or 'mevduat' in name.lower()):
-                                        return float(item.get('ratio', item.get('percentage', item.get('value', 0))))
-                    elif isinstance(obj, list):
-                        for item in obj:
-                            result = _deep_search(item)
-                            if result is not None:
-                                return result
-                    return None
-                result = _deep_search(data)
-                if result is not None:
-                    return result
-            except Exception:
-                pass
-
-        # Yontem 2: Regex ile "Nakit / Mevduat" satirini bul
-        m = re.search(r'Nakit\s*/\s*Mevduat[^%]*%(\d+[.,]\d+)', html)
-        if m:
-            return float(m.group(1).replace(',', '.'))
-
-        # Yontem 3: Varlik dagilimi tablosunu regex ile tara
-        for m in re.finditer(r'([\w\s/]+)\s+%(\d+[.,]\d+)', html):
-            name = m.group(1).strip().lower()
-            if 'nakit' in name or 'mevduat' in name:
-                return float(m.group(2).replace(',', '.'))
-
-        return None
     except Exception:
-        return None
+        return result
 
+    # =========================================================================
+    # YONTEM 1: __NEXT_DATA__ JSON blob'u (Next.js)
+    # =========================================================================
+    next_data = re.search(
+        r'<script\s+id="__NEXT_DATA__"\s+type="application/json">(.*?)</script>',
+        html, re.DOTALL,
+    )
+    if next_data:
+        try:
+            nd = json.loads(next_data.group(1))
+            result["_source"] = "next_data_json"
 
-def _calc_repo_ratio(holdings: Dict[str, Any]) -> Optional[float]:
-    """Holdings icindeki ters repo oranini hesapla.
+            # Rekursif arama: tum dict/list icinde ilgili alanlari bul
+            def _deep_find(obj, target_keys):
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        kl = k.lower()
+                        for tk in target_keys:
+                            if tk in kl:
+                                return v
+                        r = _deep_find(v, target_keys)
+                        if r is not None:
+                            return r
+                elif isinstance(obj, list):
+                    for item in obj:
+                        r = _deep_find(item, target_keys)
+                        if r is not None:
+                            return r
+                return None
 
-    Sadece latestPeriod ayina ait repo kalemlerini toplar; farkli aylara ait
-    kayitlarin birikmesini onler.
-    """
-    try:
-        # En distaki dict'ten latestPeriod'u bul
-        latest_period = None
-        if isinstance(holdings, dict):
-            latest_period = holdings.get("latestPeriod")
+            def _deep_find_dict(obj, key_hint):
+                """key_hint iceren dict'i bul (varlik dagilimi gibi)."""
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        if key_hint in k.lower() and isinstance(v, (dict, list)):
+                            return v
+                        r = _deep_find_dict(v, key_hint)
+                        if r is not None:
+                            return r
+                elif isinstance(obj, list):
+                    for item in obj:
+                        r = _deep_find_dict(item, key_hint)
+                        if r is not None:
+                            return r
+                return None
 
-        # items listesine ulas
-        container = holdings.get("data", holdings) if isinstance(holdings, dict) else {}
-        if isinstance(container, dict):
-            # latestPeriod data icine gomulu olabilir
-            if latest_period is None:
-                latest_period = container.get("latestPeriod")
-            # items = son donem (report_date'suz), holdings = tum aylar (report_date'li)
-            items_list = container.get("items", container.get("holdings", []))
-        else:
-            items_list = container
+            # NAV
+            nav_val = _deep_find(nd, ["nav", "price", "birimpay"])
+            if nav_val is not None:
+                try:
+                    result["nav"] = float(nav_val)
+                except (ValueError, TypeError):
+                    pass
 
-        if not isinstance(items_list, list):
+            # AUM
+            aum_val = _deep_find(nd, ["aum", "fundsize", "portfoliosize", "fonbuyuklugu"])
+            if aum_val is not None:
+                try:
+                    result["aum_milyar"] = float(aum_val) / 1e9
+                except (ValueError, TypeError):
+                    pass
+
+            # Yatirimci
+            inv_val = _deep_find(nd, ["investor", "yatirimci", "participant"])
+            if inv_val is not None:
+                try:
+                    result["investor_count"] = int(float(inv_val))
+                except (ValueError, TypeError):
+                    pass
+
+            # Composition / asset allocation
+            comp = _deep_find_dict(nd, "compos")
+            if comp is None:
+                comp = _deep_find_dict(nd, "asset")
+            if comp is None:
+                comp = _deep_find_dict(nd, "allocation")
+            if isinstance(comp, list):
+                alloc = {}
+                for item in comp:
+                    if isinstance(item, dict):
+                        name = item.get("name") or item.get("label") or item.get("type") or item.get("asset_type") or ""
+                        ratio = item.get("ratio") or item.get("percentage") or item.get("value") or item.get("weight") or 0
+                        if name and ratio:
+                            try:
+                                alloc[str(name)] = float(ratio)
+                            except (ValueError, TypeError):
+                                pass
+                if alloc:
+                    result["asset_allocation"] = alloc
+                    for k, v in alloc.items():
+                        kl = k.lower()
+                        if "nakit" in kl or "mevduat" in kl or "cash" in kl:
+                            if result["cash_ratio"] is None:
+                                result["cash_ratio"] = v
+                        if "hisse" in kl or "equity" in kl or "stock" in kl:
+                            if result["equity_ratio"] is None:
+                                result["equity_ratio"] = v
+
+            # Sharpe, volatility, drawdown
+            sharpe = _deep_find(nd, ["sharpe"])
+            if sharpe is not None:
+                try:
+                    result["sharpe_90d"] = float(sharpe)
+                except (ValueError, TypeError):
+                    pass
+            vol = _deep_find(nd, ["volatil", "volatility"])
+            if vol is not None:
+                try:
+                    result["volatility_90d"] = float(vol)
+                except (ValueError, TypeError):
+                    pass
+            dd = _deep_find(nd, ["drawdown", "maxdd", "max_dd"])
+            if dd is not None:
+                try:
+                    v = float(str(dd).replace("%", "").replace("-", ""))
+                    result["max_drawdown_1y"] = v
+                except (ValueError, TypeError):
+                    pass
+
+            # Returns
+            for label, key in [("1m", "1ay"), ("3m", "3ay"), ("6m", "6ay"), ("1y", "1yil")]:
+                rv = _deep_find(nd, [key, label])
+                if rv is not None:
+                    try:
+                        result["returns"][label] = float(str(rv).replace("%", ""))
+                    except (ValueError, TypeError):
+                        pass
+
+        except Exception:
+            result["_source"] = "next_data_parse_error"
+
+    # =========================================================================
+    # YONTEM 2: Regex fallback (__NEXT_DATA__ yoksa veya parse basarisizsa)
+    # =========================================================================
+    if result["_source"] in ("none", "next_data_parse_error"):
+        result["_source"] = "regex"
+
+        def _try_float(pattern, text, group=1):
+            m = re.search(pattern, text)
+            if m:
+                try:
+                    return float(m.group(group).replace(",", ".").replace(" ", ""))
+                except ValueError:
+                    pass
             return None
 
-        # items listesinde report_date varsa tum aylar demektir, filtrele
-        sample_has_date = items_list and isinstance(items_list[0], dict) and items_list[0].get("report_date") is not None
+        def _try_int(pattern, text, group=1):
+            m = re.search(pattern, text)
+            if m:
+                try:
+                    return int(m.group(group).replace(",", "").replace(".", "").replace(" ", ""))
+                except ValueError:
+                    pass
+            return None
 
-        repo_weight = 0.0
-        for item in items_list:
-            if not isinstance(item, dict):
+        # NAV: "6.567,329909" veya "6567.329909"
+        result["nav"] = _try_float(r'(?:NAV|Birim\s*Pay)[^0-9]*([\d.,]+)', html)
+        if result["nav"] is None:
+            # Sayfanin basinda fiyat olarak gosterilir
+            result["nav"] = _try_float(r'>\s*([\d]{1,3}(?:\.[\d]{3})*[,.]\d+)\s*(?:</|TL)', html)
+
+        # Gunluk NAV degisimi: "+%1,14" veya "+%1.14"
+        result["nav_change_pct"] = _try_float(r'(?:günlük|bugün).*?([+-]?\d+[.,]\d+)\s*%', html)
+
+        # AUM: "185,5 milyar TL"
+        result["aum_milyar"] = _try_float(r'([\d.,]+)\s*milyar\s*(?:TL|₺)', html)
+
+        # Yatirimci sayisi: "88.916"
+        result["investor_count"] = _try_int(r'(?:Yatırımcı|Yatirimci)\s*(?:[Ss]ayısı)?[^0-9]*([\d.,]+)', html)
+
+        # Varlik dagilimi: "Hisse Senedi %66,84" / "Nakit / Mevduat %16,12"
+        alloc = {}
+        for m in re.finditer(r'([A-Za-zÇĞİÖŞÜçğıöşü\s/]+)\s+%(\d+[.,]\d+)', html):
+            name = m.group(1).strip()
+            if len(name) < 3 or len(name) > 50:
                 continue
-            if sample_has_date and latest_period is not None:
-                if str(item.get("report_date", "")) != str(latest_period):
-                    continue
-            asset_type = item.get("asset_type", item.get("type", ""))
-            if isinstance(asset_type, str) and asset_type.lower() == "repo":
-                weight = item.get("weight", item.get("ratio", 0))
-                repo_weight += float(weight)
+            val = float(m.group(2).replace(",", "."))
+            alloc[name] = val
+        if alloc:
+            result["asset_allocation"] = alloc
 
-        return repo_weight
-    except Exception:
-        return None
+        # Nakit orani
+        for name, val in alloc.items():
+            nl = name.lower()
+            if "nakit" in nl or "mevduat" in nl:
+                if result["cash_ratio"] is None:
+                    result["cash_ratio"] = val
+            if "hisse" in nl:
+                if result["equity_ratio"] is None:
+                    result["equity_ratio"] = val
+
+        # Volatilite: "%19,0"
+        result["volatility_90d"] = _try_float(r'[Vv]olatilite[^0-9]*%?(\d+[.,]\d+)', html)
+        # Max drawdown
+        dd = _try_float(r'[Mm]ax\s*[Dd]rawdown[^0-9]*%?(\d+[.,]\d+)', html)
+        if dd:
+            result["max_drawdown_1y"] = dd
+        # Sharpe
+        result["sharpe_90d"] = _try_float(r'[Ss]harpe[^0-9]*(\d+[.,]\d+)', html)
+        # Beta
+        result["beta_1y"] = _try_float(r'[Bb]eta[^0-9]*(\d+[.,]\d+)', html)
+        # Risk skoru: "7/7"
+        rsm = re.search(r'[Rr]isk\s*(?:[Dd]eğeri|Skoru|Seviyesi)[^0-9]*(\d+/\d+)', html)
+        if rsm:
+            result["risk_score"] = rsm.group(1)
+
+        # Getiriler
+        for pat, key in [(r'1\s*Aylık[^0-9]*%?([+-]?\d+[.,]\d+)', "1m"),
+                          (r'3\s*Aylık[^0-9]*%?([+-]?\d+[.,]\d+)', "3m"),
+                          (r'6\s*Aylık[^0-9]*%?([+-]?\d+[.,]\d+)', "6m"),
+                          (r'1\s*Yıllık[^0-9]*%?([+-]?\d+[.,]\d+)', "1y")]:
+            v = _try_float(pat, html)
+            if v is not None:
+                result["returns"][key] = v
+
+        # Tarihsel stres olaylari (public sayfada varsa guncelle)
+        stress_section = re.findall(
+            r'(\d{2}\s*\w+\s*\d{4}).*?(\d{2}\s*\w+\s*\d{4}).*?(\d+)\s*gün.*?%(\d+[.,]\d+)',
+            html,
+        )
+        if stress_section:
+            events = []
+            for start, end, days, dd_pct in stress_section:
+                try:
+                    events.append({
+                        "start": start, "end": end,
+                        "days": int(days),
+                        "drawdown_pct": -float(dd_pct.replace(",", ".")),
+                    })
+                except (ValueError, TypeError):
+                    pass
+            if events:
+                result["stress_events"] = events
+
+    return result
 
 
 def _pct_change(series: pd.Series, lookback: int) -> Optional[float]:
@@ -321,30 +469,11 @@ def analyze_stress_test(
         df_history: Opsiyonel, money_flow.fetch_full_history() ciktisi.
                     Verilirse tam gecmis uzerinden konsantrasyon, AUM std
                     hesaplanir. Verilmezse son 90 gun cekilir.
-        holdings: Opsiyonel, onceden cekilmis Fonoloji holdings verisi.
-                  Verilmezse fonksiyon kendisi ceker.
+        holdings: Kullanilmiyor (geriye uyumluluk). Nakit orani Fonoloji
+                  public sayfasindan kazimir.
 
     Returns:
-        dict veya None:
-        {
-            'nav': float,
-            'nav_change': float,
-            'aum': float,
-            'aum_change_7d': float,
-            'investor_count': int,
-            'investor_change_7d': float,
-            'repo_ratio': float,
-            'cash_buffer': float,
-            'coverable_exit': float,
-            'nav_down_5d': bool,
-            'nav_trend': str,
-            'concentration_ratio': float,        # milyon TL/kisi
-            'concentration_change_30d': float,   # % degisim
-            'daily_aum_std': float,              # gunluk AUM degisim std
-            'stress_level': str,
-            'triggered_rule_count': int,
-            'warnings': list[str],
-        }
+        dict veya None. Detayli alanlar icin kod icinde return dict'e bakiniz.
     """
     # Tam gecmis verildiyse onu kullan, yoksa kendimiz cekelim
     if df_history is not None and not df_history.empty:
@@ -435,25 +564,13 @@ def analyze_stress_test(
                 if len(aum_changes) >= 1:
                     daily_aum_change_pct = round(float(aum_changes.iloc[-1]) * 100.0, 4)
 
-        # ---- Fonoloji holdings cek ----
+        # ---- Nakit tamponu: Fonoloji public sayfasindan kazir ----
         fonoloji_error = None
         repo_ratio = None
-        fonoloji_data = holdings if holdings is not None else fetch_holdings()
-
-        if fonoloji_data is not None:
-            repo_ratio = _calc_repo_ratio(fonoloji_data)
-            if repo_ratio is None:
-                keys = list(fonoloji_data.keys()) if isinstance(fonoloji_data, dict) else []
-                fonoloji_error = f"_calc_repo_ratio None, data keys: {keys}"
-
+        scraped = _scrape_fonoloji_public()
+        repo_ratio = scraped.get("cash_ratio")
         if repo_ratio is None:
-            # API basarisizsa public sayfadan Nakit/Mevduat oranini scrape et
-            scraped = _scrape_cash_from_public()
-            if scraped is not None:
-                repo_ratio = scraped
-                fonoloji_error = None
-            elif fonoloji_data is None:
-                fonoloji_error = "Fonoloji API yanit vermedi"
+            fonoloji_error = "Public sayfada nakit/m mevduat orani bulunamadi"
 
         # ---- Hesaplamalar ----
         cash_buffer = None
@@ -556,6 +673,7 @@ def analyze_stress_test(
             "triggered_rule_count": rule_count,
             "warnings": warnings,
             "historical_stress_comparison": historical_stress_comparison,
+            "_fonoloji_public": scraped,  # public sayfadan kazinan tum veriler
         }
     except Exception:
         return None
