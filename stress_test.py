@@ -264,84 +264,91 @@ def _scrape_fonoloji_public() -> Dict[str, Any]:
                     pass
             return None
 
-        # NAV: "6.567,329909" veya "6567.329909"
-        result["nav"] = _try_float(r'(?:NAV|Birim\s*Pay)[^0-9]*([\d.,]+)', html)
-        if result["nav"] is None:
-            # Sayfanin basinda fiyat olarak gosterilir
-            result["nav"] = _try_float(r'>\s*([\d]{1,3}(?:\.[\d]{3})*[,.]\d+)\s*(?:</|TL)', html)
+        # NAV fiyati — sayfada birden fazla yerde gecen fiyat degerlerinden
+        # en guvenilirini al: 6.567,XX formatinda 4+ haneli
+        for nav_pat in [
+            r'>\s*(\d{1,3}(?:\.\d{3})*(?:,\d+))\s*<',  # formatted price
+            r'(\d{1,3}(?:\.\d{3})*(?:,\d{4,}))',       # NAV with many decimals
+        ]:
+            nav_val = _try_float(nav_pat, html)
+            if nav_val and nav_val > 100:  # NAV > 100 TL
+                result["nav"] = nav_val
+                break
 
-        # Gunluk NAV degisimi: "+%1,14" veya "+%1.14"
-        result["nav_change_pct"] = _try_float(r'(?:günlük|bugün).*?([+-]?\d+[.,]\d+)\s*%', html)
+        # Gunluk NAV degisimi
+        result["nav_change_pct"] = _try_float(r'(?:günlük|bugün|değişim).*?([+-]?\d+[.,]\d+)\s*%', html)
 
-        # AUM: "185,5 milyar TL"
-        result["aum_milyar"] = _try_float(r'([\d.,]+)\s*milyar\s*(?:TL|₺)', html)
+        # AUM: Fonoloji sayfasinda "X milyar TL" veya "fon büyüklüğü"
+        aum = _try_float(r'(?:fon\s*büyüklüğü|AUM)[^0-9]*([\d.,]+)\s*milyar', html)
+        if aum is None:
+            aum = _try_float(r'([\d.,]+)\s*milyar\s*(?:TL|₺)', html)
+        result["aum_milyar"] = aum
 
-        # Yatirimci sayisi: "88.916"
-        result["investor_count"] = _try_int(r'(?:Yatırımcı|Yatirimci)\s*(?:[Ss]ayısı)?[^0-9]*([\d.,]+)', html)
+        # Yatirimci sayisi
+        result["investor_count"] = _try_int(r'(?:Yatırımcı|Yatirimci)[^0-9]*?(\d{1,3}(?:\.\d{3})*(?:,\d+)?)', html)
 
-        # Varlik dagilimi: "Hisse Senedi %66,84" / "Nakit / Mevduat %16,12"
+        # ===== VARLIK DAGILIMI: bilinen varlik sinifi isimlerine gore hedefle =====
         alloc = {}
-        for m in re.finditer(r'([A-Za-zÇĞİÖŞÜçğıöşü\s/]+)\s+%(\d+[.,]\d+)', html):
-            name = m.group(1).strip()
-            if len(name) < 3 or len(name) > 50:
-                continue
-            val = float(m.group(2).replace(",", "."))
-            alloc[name] = val
+        KNOWN_CLASSES = [
+            (r'Hisse\s*Senedi', 'Hisse Senedi'),
+            (r'Devlet\s*(?:Tahvili|İç\s*Borçlanma)', 'Devlet Tahvili'),
+            (r'Özel\s*Sektör', 'Ozel Sektor'),
+            (r'Nakit\s*(?:/\s*Mevduat)?', 'Nakit / Mevduat'),
+            (r'Mevduat', 'Nakit / Mevduat'),
+            (r'Diğer', 'Diger'),
+        ]
+        for pat, label in KNOWN_CLASSES:
+            m = re.search(pat + r'[^%]*%(\d+[.,]\d+)', html)
+            if m:
+                try:
+                    val = float(m.group(1).replace(',', '.'))
+                    alloc[label] = val
+                    # Ilk kez yakalanan cash/equity
+                    if label == 'Nakit / Mevduat' and result["cash_ratio"] is None:
+                        result["cash_ratio"] = val
+                    if label == 'Hisse Senedi' and result["equity_ratio"] is None:
+                        result["equity_ratio"] = val
+                except (ValueError, IndexError):
+                    pass
         if alloc:
             result["asset_allocation"] = alloc
 
-        # Nakit orani
-        for name, val in alloc.items():
-            nl = name.lower()
-            if "nakit" in nl or "mevduat" in nl:
+        # Fallback: daha genis varlik dagilimi regex (sadece bilinen siniflar yoksa)
+        if not alloc:
+            for m in re.finditer(r'(Hisse\s*Senedi|Nakit[^%]*|Mevduat[^%]*|Özel\s*Sektör|Devlet\s*Tahvili|Diğer)[^%]*%(\d+[.,]\d+)', html):
+                name = m.group(1).strip()
+                try:
+                    val = float(m.group(2).replace(',', '.'))
+                    alloc[name] = val
+                except (ValueError, IndexError):
+                    pass
+            if alloc:
+                result["asset_allocation"] = alloc
                 if result["cash_ratio"] is None:
-                    result["cash_ratio"] = val
-            if "hisse" in nl:
+                    for k, v in alloc.items():
+                        if 'nakit' in k.lower() or 'mevduat' in k.lower():
+                            result["cash_ratio"] = v
+                            break
                 if result["equity_ratio"] is None:
-                    result["equity_ratio"] = val
+                    for k, v in alloc.items():
+                        if 'hisse' in k.lower():
+                            result["equity_ratio"] = v
+                            break
 
-        # Volatilite: "%19,0"
+        # Sharpe
+        result["sharpe_90d"] = _try_float(r'[Ss]harpe[^0-9]*(\d+[.,]\d+)', html)
+        # Volatilite
         result["volatility_90d"] = _try_float(r'[Vv]olatilite[^0-9]*%?(\d+[.,]\d+)', html)
         # Max drawdown
         dd = _try_float(r'[Mm]ax\s*[Dd]rawdown[^0-9]*%?(\d+[.,]\d+)', html)
         if dd:
             result["max_drawdown_1y"] = dd
-        # Sharpe
-        result["sharpe_90d"] = _try_float(r'[Ss]harpe[^0-9]*(\d+[.,]\d+)', html)
         # Beta
         result["beta_1y"] = _try_float(r'[Bb]eta[^0-9]*(\d+[.,]\d+)', html)
-        # Risk skoru: "7/7"
-        rsm = re.search(r'[Rr]isk\s*(?:[Dd]eğeri|Skoru|Seviyesi)[^0-9]*(\d+/\d+)', html)
+        # Risk skoru
+        rsm = re.search(r'[Rr]isk\s*(?:[Dd]eğeri|Skoru|Seviyesi)[^0-9]*(\d+\s*/\s*\d+)', html)
         if rsm:
-            result["risk_score"] = rsm.group(1)
-
-        # Getiriler
-        for pat, key in [(r'1\s*Aylık[^0-9]*%?([+-]?\d+[.,]\d+)', "1m"),
-                          (r'3\s*Aylık[^0-9]*%?([+-]?\d+[.,]\d+)', "3m"),
-                          (r'6\s*Aylık[^0-9]*%?([+-]?\d+[.,]\d+)', "6m"),
-                          (r'1\s*Yıllık[^0-9]*%?([+-]?\d+[.,]\d+)', "1y")]:
-            v = _try_float(pat, html)
-            if v is not None:
-                result["returns"][key] = v
-
-        # Tarihsel stres olaylari (public sayfada varsa guncelle)
-        stress_section = re.findall(
-            r'(\d{2}\s*\w+\s*\d{4}).*?(\d{2}\s*\w+\s*\d{4}).*?(\d+)\s*gün.*?%(\d+[.,]\d+)',
-            html,
-        )
-        if stress_section:
-            events = []
-            for start, end, days, dd_pct in stress_section:
-                try:
-                    events.append({
-                        "start": start, "end": end,
-                        "days": int(days),
-                        "drawdown_pct": -float(dd_pct.replace(",", ".")),
-                    })
-                except (ValueError, TypeError):
-                    pass
-            if events:
-                result["stress_events"] = events
+            result["risk_score"] = rsm.group(1).replace(' ', '')
 
     return result
 
