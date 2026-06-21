@@ -239,7 +239,10 @@ def get_historical_stress_comparison(stress_level: str, nav_trend: str) -> str:
     return "\n".join(lines)
 
 
-def analyze_stress_test(df_history: Optional[pd.DataFrame] = None) -> Optional[Dict[str, Any]]:
+def analyze_stress_test(
+    df_history: Optional[pd.DataFrame] = None,
+    holdings: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
     """
     Stres testi ve fon sagligi analizi yapar.
 
@@ -247,6 +250,8 @@ def analyze_stress_test(df_history: Optional[pd.DataFrame] = None) -> Optional[D
         df_history: Opsiyonel, money_flow.fetch_full_history() ciktisi.
                     Verilirse tam gecmis uzerinden konsantrasyon, AUM std
                     hesaplanir. Verilmezse son 90 gun cekilir.
+        holdings: Opsiyonel, onceden cekilmis Fonoloji holdings verisi.
+                  Verilmezse fonksiyon kendisi ceker.
 
     Returns:
         dict veya None:
@@ -360,8 +365,8 @@ def analyze_stress_test(df_history: Optional[pd.DataFrame] = None) -> Optional[D
                     daily_aum_change_pct = round(float(aum_changes.iloc[-1]) * 100.0, 4)
 
         # ---- Fonoloji holdings cek ----
-        holdings = _fetch_holdings()
-        repo_ratio = _calc_repo_ratio(holdings) if holdings else None
+        fonoloji_data = holdings if holdings is not None else _fetch_holdings()
+        repo_ratio = _calc_repo_ratio(fonoloji_data) if fonoloji_data else None
 
         # ---- Hesaplamalar ----
         cash_buffer = None

@@ -84,6 +84,13 @@ def fetch_rotation_data():
     return analyze_rotation()
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_fonoloji_holdings_cached():
+    """Fonoloji holdings verisini ceker, 1 saat cache'ler."""
+    from stress_test import _fetch_holdings
+    return _fetch_holdings()
+
+
 # ---------------------------------------------------------------------------
 # Sidebar — Parametreler
 # ---------------------------------------------------------------------------
@@ -233,7 +240,11 @@ sim = run_simulation(capital=capital, equity_ratio=equity_ratio, panic_rate=pani
 # Stres testi ve rotasyon (erken hesapla, ozet icin gerekli)
 # Tek seferde cek: once TEFAS gecmisi, sonra stress_test (Fonoloji API dahil)
 tefas_full_raw = fetch_tefas_data(fast_mode=True)
-stress = analyze_stress_test(df_history=tefas_full_raw if tefas_full_raw is not None else None)
+fonoloji_holdings = fetch_fonoloji_holdings_cached()
+stress = analyze_stress_test(
+    df_history=tefas_full_raw if tefas_full_raw is not None else None,
+    holdings=fonoloji_holdings,
+)
 rotation = fetch_rotation_data()
 
 # Gunluk ozet
