@@ -50,81 +50,70 @@ def _fetch_tefas_data(days: int = HISTORY_DAYS) -> Optional[pd.DataFrame]:
 
 
 def _fetch_holdings() -> Optional[Dict[str, Any]]:
-    """Fonoloji API'den TLY holdings verisini ceker. Hata sebebini debug loguna yazar."""
+    """Fonoloji API'den TLY holdings verisini ceker."""
     try:
         from config import FONOLOJI_API_KEY
     except ImportError:
-        print("  [DEBUG] config'den FONOLOJI_API_KEY import edilemedi")
         return None
 
     if not FONOLOJI_API_KEY:
-        print("  [DEBUG] FONOLOJI_API_KEY bos — nakit tamponu hesaplanamaz")
         return None
 
     try:
         url = "https://fonoloji.com/v1/funds/TLY/holdings"
         req = urllib.request.Request(url)
-        req.add_header("Authorization", f"Bearer {FONOLOJI_API_KEY}")
-        req.add_header("User-Agent", "TLY-Risk-Monitor/1.0")
+        req.add_header("X-API-Key", FONOLOJI_API_KEY)
+        req.add_header("User-Agent", "Mozilla/5.0")
         req.add_header("Accept", "application/json")
         with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8")
-            data = json.loads(raw)
-            print(f"  [DEBUG] Fonoloji holdings alindi, tip={type(data).__name__}")
-            # Ilk birkac key'i goster
-            if isinstance(data, dict):
-                keys = list(data.keys())
-                print(f"  [DEBUG]   root keys: {keys[:5]}")
-                inner = data.get("data", data)
-                if isinstance(inner, dict):
-                    inner_keys = list(inner.keys())[:5]
-                    print(f"  [DEBUG]   inner keys: {inner_keys}")
-                    items = inner.get("holdings", inner.get("items", []))
-                    if isinstance(items, list) and len(items) > 0:
-                        item0 = items[0]
-                        print(f"  [DEBUG]   ilk holding keys: {list(item0.keys())[:8]}")
-                        print(f"  [DEBUG]   ilk holding ornek: {str(item0)[:200]}")
-            return data
-    except Exception as e:
-        print(f"  [DEBUG] Fonoloji API hatasi: {type(e).__name__}: {e}")
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
         return None
 
 
 def _calc_repo_ratio(holdings: Dict[str, Any]) -> Optional[float]:
-    """Holdings icindeki ters repo oranini hesapla (asset_type == 'repo' weight toplami)."""
+    """Holdings icindeki ters repo oranini hesapla.
+
+    Sadece latestPeriod ayina ait repo kalemlerini toplar; farkli aylara ait
+    kayitlarin birikmesini onler.
+    """
     try:
-        items = holdings.get("data", holdings) if isinstance(holdings, dict) else []
-        if isinstance(items, dict):
-            items = items.get("holdings", items.get("items", []))
-        if not isinstance(items, list):
-            print(f"  [DEBUG] _calc_repo_ratio: items list degil, tip={type(items).__name__}")
+        # En distaki dict'ten latestPeriod'u bul
+        latest_period = None
+        if isinstance(holdings, dict):
+            latest_period = holdings.get("latestPeriod")
+
+        # items listesine ulas
+        container = holdings.get("data", holdings) if isinstance(holdings, dict) else {}
+        if isinstance(container, dict):
+            # latestPeriod data icine gomulu olabilir
+            if latest_period is None:
+                latest_period = container.get("latestPeriod")
+            # items = son donem (report_date'suz), holdings = tum aylar (report_date'li)
+            items_list = container.get("items", container.get("holdings", []))
+        else:
+            items_list = container
+
+        if not isinstance(items_list, list):
             return None
 
+        # items listesinde report_date varsa tum aylar demektir, filtrele
+        sample_has_date = items_list and isinstance(items_list[0], dict) and items_list[0].get("report_date") is not None
+
         repo_weight = 0.0
-        found_repo = False
-        for item in items:
+        for item in items_list:
             if not isinstance(item, dict):
                 continue
+            if sample_has_date and latest_period is not None:
+                if str(item.get("report_date", "")) != str(latest_period):
+                    continue
             asset_type = item.get("asset_type", item.get("type", ""))
             if isinstance(asset_type, str) and asset_type.lower() == "repo":
                 weight = item.get("weight", item.get("ratio", 0))
                 repo_weight += float(weight)
-                found_repo = True
-                print(f"  [DEBUG]   repo bulundu: weight={weight}, topRepo={repo_weight:.2f}")
-
-        if not found_repo:
-            # Varlik tiplerini listele (debug)
-            types_seen = set()
-            for item in items:
-                if isinstance(item, dict):
-                    t = item.get("asset_type", item.get("type", "?"))
-                    types_seen.add(str(t))
-            print(f"  [DEBUG] _calc_repo_ratio: repo bulunamadi, mevcut tipler: {sorted(types_seen)}")
-            return 0.0  # repo yoksa 0 dondur (None yerine)
 
         return repo_weight
-    except Exception as e:
-        print(f"  [DEBUG] _calc_repo_ratio hata: {type(e).__name__}: {e}")
+    except Exception:
         return None
 
 
@@ -266,11 +255,13 @@ def analyze_stress_test(df_history: Optional[pd.DataFrame] = None) -> Optional[D
 
         # NAV trend (son 5 vs onceki 5)
         nav_trend = "flat"
+        nav_trend_pct = None
         if len(valid_df) >= 10:
             recent_5 = valid_df[price_col].iloc[-5:].mean()
             prev_5 = valid_df[price_col].iloc[-10:-5].mean()
             if prev_5 > 0:
                 diff = (recent_5 - prev_5) / prev_5
+                nav_trend_pct = round(diff * 100.0, 2)
                 if diff > 0.002:
                     nav_trend = "up"
                 elif diff < -0.002:
@@ -401,6 +392,7 @@ def analyze_stress_test(df_history: Optional[pd.DataFrame] = None) -> Optional[D
             "coverable_exit": coverable_exit,
             "nav_down_5d": nav_down_5d,
             "nav_trend": nav_trend,
+            "nav_trend_pct": nav_trend_pct,
             "concentration_ratio": concentration_ratio,
             "concentration_change_30d": concentration_change_30d,
             "daily_aum_std": daily_aum_std,

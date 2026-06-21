@@ -109,80 +109,6 @@ def print_header(report_date: Optional[date] = None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Net Portföy Etkisi Hesaplama
-# ---------------------------------------------------------------------------
-
-NET_EFFECT_CRITICAL_THRESHOLD = -3.0
-NET_EFFECT_LARGE_MOVE_THRESHOLD = 5.0   # tek hisse %5+ hareket = "buyuk hareket"
-
-
-def compute_net_portfolio_effect(per_stock: Dict[str, Dict[str, Any]]) -> float:
-    """Agirlikli ortalama gunluk degisimi hesaplar (fon tipi varliklar haric).
-
-    Her hissenin agirligi x gunluk degisim yuzdesi carpilir, toplanir.
-    Bu, fonun hisse portfoyunun BUGUN gercekte ne kadar degistigini gosterir.
-    """
-    total_weight = 0.0
-    weighted_change = 0.0
-
-    for ticker, data in per_stock.items():
-        if data.get("is_fund"):
-            continue
-        weight = data.get("weight", 0.0)
-        change_pct = data.get("change_pct")
-        if change_pct is None:
-            continue
-        weighted_change += weight * change_pct
-        total_weight += weight
-
-    if total_weight == 0:
-        return 0.0
-
-    return weighted_change / 100.0  # %1 agirlik x %5 degisim = 0.05 puan
-
-
-def _has_large_moves(per_stock: Dict[str, Dict[str, Any]]) -> bool:
-    """En az bir hissede |%5|+ gunluk hareket var mi?"""
-    for ticker, data in per_stock.items():
-        if data.get("is_fund"):
-            continue
-        change_pct = data.get("change_pct")
-        if change_pct is not None and abs(change_pct) >= NET_EFFECT_LARGE_MOVE_THRESHOLD:
-            return True
-    return False
-
-
-def print_net_portfolio_effect(per_stock: Dict[str, Dict[str, Any]]) -> None:
-    """Net portfoy etkisini terminal raporuna yazdirir."""
-    net_effect = compute_net_portfolio_effect(per_stock)
-    has_large = _has_large_moves(per_stock)
-
-    print()
-    print(C_WHITE + "[ NET PORTFOY ETKISI - BUGUN ]" + C_RESET)
-
-    # Renkli deger
-    if net_effect > 0:
-        effect_str = C_GREEN + f"+%{net_effect:.2f}" + C_RESET
-    elif net_effect < 0:
-        effect_str = C_RED + f"-%{abs(net_effect):.2f}" + C_RESET
-    else:
-        effect_str = f"%{net_effect:.2f}"
-
-    print(f"  Agirlikli Ortalama Degisim: {effect_str}")
-
-    # Yorum
-    if net_effect < NET_EFFECT_CRITICAL_THRESHOLD:
-        print()
-        print(C_RED + f"  GERCEK KAYIP: Rotasyon riski dengeleyemedi, bugun net -%{abs(net_effect):.2f} kayip" + C_RESET)
-    elif abs(net_effect) <= 1.0 and has_large:
-        print(f"  " + C_CYAN + "Rotasyon dengelemesi: Buyuk hareketler birbirini notrledi" + C_RESET)
-    elif net_effect > 0:
-        print(f"  Hisse portfoyu bugun pozitif etkide.")
-    else:
-        print(f"  Hisse portfoyu bugun negatif etkide, ancak esik altinda.")
-
-
-# ---------------------------------------------------------------------------
 # Risk Skoru Tablosu
 # ---------------------------------------------------------------------------
 
@@ -337,14 +263,15 @@ def _fmt_tl_short(value: float) -> str:
         return f"{value:,.0f} TL"
 
 
-def _fmt_trend(trend: str) -> str:
-    """Trend yönünü sembolleştir."""
+def _fmt_trend(trend: str, trend_pct: Optional[float] = None) -> str:
+    """Trend yönünü sembolleştirir, varsa yüzde değişimi de ekler."""
+    pct_str = f" (%{trend_pct:+.2f})" if trend_pct is not None else ""
     if trend == "up":
-        return C_GREEN + "/\\ Buyuyor" + C_RESET
+        return C_GREEN + f"/\\ Buyuyor{pct_str}" + C_RESET
     elif trend == "down":
-        return C_RED + "\\/ Daraliyor" + C_RESET
+        return C_RED + f"\\/ Daraliyor{pct_str}" + C_RESET
     else:
-        return C_YELLOW + "-- Yatay" + C_RESET
+        return C_YELLOW + f"-- Yatay{pct_str}" + C_RESET
 
 
 def print_fund_health(health: Optional[Dict[str, Any]]) -> None:
@@ -378,7 +305,8 @@ def print_fund_health(health: Optional[Dict[str, Any]]) -> None:
         sign = "+" if inv_change_7d > 0 else ""
         inv_str += f"  ({sign}{inv_change_7d:.0f} haftalık)"
 
-    trend_str = _fmt_trend(trend)
+    trend_pct = health.get("trend_pct")
+    trend_str = _fmt_trend(trend, trend_pct)
 
     print(f"  {'NAV Fiyatı':<20}: {nav_str}")
     print(f"  {'Fon Büyüklüğü':<20}: {aum_str}")
@@ -406,30 +334,55 @@ def _fmt_tl_billion(value: float) -> str:
     return f"{value/1e9:.1f} milyar TL"
 
 
-def _fmt_trend_arrow(trend: str) -> str:
-    """NAV trend yonunu sembollestir."""
+def _fmt_trend_arrow(trend: str, trend_pct: Optional[float] = None) -> str:
+    """NAV trend yonunu sembollestirir, varsa yuzde degisimi de ekler."""
+    pct_str = f" (%{trend_pct:+.2f})" if trend_pct is not None else ""
     if trend == "up":
-        return C_GREEN + "↗ Yukseliyor" + C_RESET
+        return C_GREEN + f"↗ Yukseliyor{pct_str}" + C_RESET
     elif trend == "down":
-        return C_RED + "↘ Dusuyor" + C_RESET
+        return C_RED + f"↘ Dusuyor{pct_str}" + C_RESET
     else:
-        return C_YELLOW + "→ Yatay" + C_RESET
+        return C_YELLOW + f"→ Yatay{pct_str}" + C_RESET
 
 
 def print_stress_test(stress: Optional[Dict[str, Any]]) -> None:
-    """Stres testi bolumunu yazdir (NAV/AUM/yatirimci fon sagliginda gosterildi). Veri yoksa sessizce atlar."""
+    """Stres testi ve fon sagligi bolumunu yazdir. Veri yoksa sessizce atlar."""
     if stress is None:
         return
 
     print()
-    print(C_WHITE + "[ STRES TESTI ]" + C_RESET)
+    print(C_WHITE + "[ STRES TESTI & FON SAGLIGI ]" + C_RESET)
 
+    nav = stress.get("nav")
+    nav_change = stress.get("nav_change")
+    aum = stress.get("aum")
+    aum_change_7d = stress.get("aum_change_7d")
+    inv = stress.get("investor_count")
+    inv_change_7d = stress.get("investor_change_7d")
     repo_ratio = stress.get("repo_ratio")
     cash_buffer = stress.get("cash_buffer")
     coverable_exit = stress.get("coverable_exit")
     nav_trend = stress.get("nav_trend", "flat")
     stress_level = stress.get("stress_level", "low")
     warnings = stress.get("warnings", [])
+
+    # NAV Fiyati
+    nav_str = f"{nav:,.4f} TL" if nav is not None else "N/A"
+    if nav_change is not None:
+        sign = "+" if nav_change > 0 else ""
+        nav_str += f"  ({sign}{nav_change:.2f}% bugun)"
+
+    # Fon Buyuklugu (AUM)
+    aum_str = _fmt_tl_billion(aum) if aum is not None else "N/A"
+    if aum_change_7d is not None:
+        sign = "+" if aum_change_7d > 0 else ""
+        aum_str += f"  ({sign}{aum_change_7d:.1f}% haftalik)"
+
+    # Yatirimci Sayisi
+    inv_str = f"{inv:,}" if inv is not None else "N/A"
+    if inv_change_7d is not None:
+        sign = "+" if inv_change_7d > 0 else ""
+        inv_str += f"  ({sign}{inv_change_7d:.0f} haftalik)"
 
     # Nakit Tamponu
     if repo_ratio is not None:
@@ -446,7 +399,8 @@ def print_stress_test(stress: Optional[Dict[str, Any]]) -> None:
         exit_str = "N/A"
 
     # NAV Trend
-    trend_str = _fmt_trend_arrow(nav_trend)
+    nav_trend_pct = stress.get("nav_trend_pct")
+    trend_str = _fmt_trend_arrow(nav_trend, nav_trend_pct)
 
     # Konsantrasyon orani
     conc = stress.get("concentration_ratio")
@@ -456,6 +410,9 @@ def print_stress_test(stress: Optional[Dict[str, Any]]) -> None:
         sign = "+" if conc_change > 0 else ""
         conc_str += f"  (30g: {sign}{conc_change:.1f}%)"
 
+    print(f"  {'NAV Fiyati':<24}: {nav_str}")
+    print(f"  {'Fon Buyuklugu (AUM)':<24}: {aum_str}")
+    print(f"  {'Yatirimci Sayisi':<24}: {inv_str}")
     print(f"  {'Konsantrasyon Orani':<24}: {conc_str}")
     print(f"  {'Nakit Tamponu':<24}: {cash_str}")
     print(f"  {'Karsilanabilir Cikis':<24}: {exit_str}")

@@ -28,7 +28,6 @@ from money_flow import (
     export_to_excel, current_month_highlight,
 )
 from rotation_tracker import analyze_rotation
-from reporter import compute_net_portfolio_effect
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -227,14 +226,7 @@ if portfolio_data is None:
 # TEFAS fon sagligi (risk analizinden once, sessiz cokus tespiti icin)
 fund_health = analyze_fund_health()
 
-try:
-    analysis = analyze_portfolio(portfolio_data, fund_health=fund_health)
-except Exception as e:
-    import traceback
-    st.error(f"Risk analizi sırasında hata: {type(e).__name__}: {e}")
-    st.code(traceback.format_exc(), language="python")
-    st.stop()
-
+analysis = analyze_portfolio(portfolio_data, fund_health=fund_health)
 sim = run_simulation(capital=capital, equity_ratio=equity_ratio, panic_rate=panic_rate)
 
 # ---------------------------------------------------------------------------
@@ -266,63 +258,6 @@ with col4:
 with col5:
     st.metric("Hisse Değeri (Gün 0)", f"{sim['daily_equity_values'][0]:,.0f} ₺",
               help="Verilen anaparanın hisse senedine yatırılmış kısmının bugünkü değeri.")
-
-# ---------------------------------------------------------------------------
-# Net Portföy Etkisi — Büyük Metrik Kutusu
-# ---------------------------------------------------------------------------
-net_effect = compute_net_portfolio_effect(analysis["per_stock"])
-has_large_moves = any(
-    abs(d.get("change_pct") or 0) >= 5.0
-    for d in analysis["per_stock"].values()
-    if not d.get("is_fund")
-)
-
-st.markdown("---")
-
-# Ana metrik kutusu
-if net_effect > 0:
-    net_color = "#27ae60"
-    net_icon = "📈"
-    net_sign = "+"
-elif net_effect < 0:
-    net_color = "#e74c3c"
-    net_icon = "📉"
-    net_sign = "-"
-else:
-    net_color = "#95a5a6"
-    net_icon = "➖"
-    net_sign = ""
-
-st.markdown(f"""
-<div style="
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    border: 2px solid {net_color};
-    border-radius: 16px;
-    padding: 1.5rem 2rem;
-    margin: 0.5rem 0 1rem 0;
-    text-align: center;
-">
-    <div style="font-size: 0.85rem; color: #888; margin-bottom: 0.3rem; letter-spacing: 1px;">
-        BUGÜNKÜ NET ETKİ
-    </div>
-    <div style="font-size: 2.8rem; font-weight: 800; color: {net_color}; line-height: 1.1;">
-        {net_icon} {net_sign}%{abs(net_effect):.2f}
-    </div>
-    <div style="font-size: 0.85rem; color: #888; margin-top: 0.3rem;">
-        Hisse portföyünün ağırlıklı ortalama günlük değişimi
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-# Yorum satiri
-if net_effect < -3.0:
-    st.error(f"🚨 GERÇEK KAYIP: Rotasyon riski dengeleyemedi, bugün net -%{abs(net_effect):.2f} kayıp")
-elif abs(net_effect) <= 1.0 and has_large_moves:
-    st.info(f"ℹ️ Rotasyon dengelemesi: Büyük hareketler birbirini nötrledi (net %{net_effect:+.2f})")
-elif net_effect > 0:
-    st.success(f"Hisseler arası hareketler birbirini dengeledi, net etki pozitif (%{net_effect:+.2f})")
-else:
-    st.warning(f"Hisseler arası hareketler birbirini dengeledi, net etki negatif (%{net_effect:+.2f})")
 
 # ---------------------------------------------------------------------------
 # Risk tablosu
@@ -576,7 +511,9 @@ else:
 
     # Trend satırı
     trend_icon = {"up": "↗ Büyüyor", "down": "↘ Daralıyor", "flat": "→ Yatay"}
-    st.caption(f"**30G Trend:** {trend_icon.get(trend, trend)}")
+    trend_pct_val = fund_health.get("trend_pct")
+    pct_suffix = f" (%{trend_pct_val:+.2f})" if trend_pct_val is not None else ""
+    st.caption(f"**30G Trend:** {trend_icon.get(trend, trend)}{pct_suffix}")
 
     # Uyarılar
     for w in fund_health.get("warnings", []):
@@ -586,17 +523,23 @@ else:
             st.warning(w)
 
 # ---------------------------------------------------------------------------
-# Stres Testi
+# Stres Testi & Fon Sağlığı
 # ---------------------------------------------------------------------------
 st.markdown("---")
-st.markdown("### 🧪 Stres Testi")
+st.markdown("### 🧪 Stres Testi & Fon Sağlığı")
 
-# Stres testi: kendi verisini ceker (opsiyonel tam gecmis destegi yok bu asamada)
-stress = analyze_stress_test()
+# Stres testi: tam gecmis veriyle (tefas_full varsa)
+stress = analyze_stress_test(df_history=tefas_full if tefas_full is not None else None)
 
 if stress is None:
     st.caption("Stres testi verisi şu anda çekilemiyor (TEFAS veya Fonoloji erişilemez).")
 else:
+    nav = stress.get("nav")
+    nav_change = stress.get("nav_change")
+    aum = stress.get("aum")
+    aum_change_7d = stress.get("aum_change_7d")
+    inv = stress.get("investor_count")
+    inv_change_7d = stress.get("investor_change_7d")
     repo_ratio = stress.get("repo_ratio")
     cash_buffer = stress.get("cash_buffer")
     coverable_exit = stress.get("coverable_exit")
@@ -606,6 +549,39 @@ else:
     concentration_change_30d = stress.get("concentration_change_30d")
     triggered_rules = stress.get("triggered_rule_count", 0)
     warnings = stress.get("warnings", [])
+
+    sc1, sc2, sc3 = st.columns(3)
+
+    with sc1:
+        if nav is not None:
+            delta_str = f"{nav_change:+.2f}% bugün" if nav_change is not None else None
+            st.metric("NAV Fiyatı", f"{nav:,.4f} ₺", delta=delta_str,
+                      help="Fonun bir payının güncel fiyatı (TL). Günlük değişim fon performansını gösterir.")
+        else:
+            st.metric("NAV Fiyatı", "Veri yok",
+                      help="TEFAS'tan NAV verisi çekilemedi.")
+
+    with sc2:
+        if aum is not None:
+            aum_display = f"{aum/1e9:.1f} milyar ₺"
+            delta_str = f"{aum_change_7d:+.1f}% haftalık" if aum_change_7d is not None else None
+            st.metric("Fon Büyüklüğü (AUM)", aum_display, delta=delta_str,
+                      delta_color="normal" if (aum_change_7d is None or aum_change_7d >= 0) else "inverse",
+                      help="Assets Under Management — fonun yönettiği toplam varlık değeri. Haftalık değişim para giriş/çıkışının göstergesidir.")
+        else:
+            st.metric("Fon Büyüklüğü (AUM)", "Veri yok",
+                      help="TEFAS'tan AUM verisi çekilemedi.")
+
+    with sc3:
+        if inv is not None:
+            inv_display = f"{inv:,}"
+            delta_str = f"{inv_change_7d:+.0f} haftalık" if inv_change_7d is not None else None
+            st.metric("Yatırımcı Sayısı", inv_display, delta=delta_str,
+                      delta_color="normal" if (inv_change_7d is None or inv_change_7d >= 0) else "inverse",
+                      help="Fona kayıtlı kişi sayısı. Hızlı düşüş büyük yatırımcı çıkışına işaret edebilir.")
+        else:
+            st.metric("Yatırımcı Sayısı", "Veri yok",
+                      help="TEFAS'tan yatırımcı sayısı çekilemedi.")
 
     # Nakit tamponu ve karşılanabilir çıkış
     sc4, sc5 = st.columns(2)
@@ -648,7 +624,9 @@ else:
 
     # NAV Trend
     trend_icon = {"up": "↗ Yükseliyor", "down": "↘ Düşüyor", "flat": "→ Yatay"}
-    st.caption(f"**NAV Trend (5 gün):** {trend_icon.get(nav_trend, nav_trend)}")
+    nav_trend_pct_val = stress.get("nav_trend_pct")
+    pct_suffix = f" (%{nav_trend_pct_val:+.2f})" if nav_trend_pct_val is not None else ""
+    st.caption(f"**NAV Trend (5 gün):** {trend_icon.get(nav_trend, nav_trend)}{pct_suffix}")
 
     # Stres Seviyesi
     st.markdown("#### Stres Seviyesi")
