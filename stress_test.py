@@ -74,10 +74,11 @@ def fetch_holdings() -> Optional[Dict[str, Any]]:
         req = urllib.request.Request(url)
         req.add_header("X-API-Key", FONOLOJI_API_KEY)
         req.add_header("User-Agent", "Mozilla/5.0")
-        req.add_header("Accept", "application/json")
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except Exception:
+    except Exception as e:
+        import sys
+        print(f"[stress_test] Fonoloji API hatasi: {type(e).__name__}: {e}", file=sys.stderr)
         return None
 
 
@@ -365,8 +366,16 @@ def analyze_stress_test(
                     daily_aum_change_pct = round(float(aum_changes.iloc[-1]) * 100.0, 4)
 
         # ---- Fonoloji holdings cek ----
+        fonoloji_error = None
         fonoloji_data = holdings if holdings is not None else fetch_holdings()
-        repo_ratio = _calc_repo_ratio(fonoloji_data) if fonoloji_data else None
+        if fonoloji_data is None:
+            fonoloji_error = "Fonoloji API yanit vermedi"
+            repo_ratio = None
+        else:
+            repo_ratio = _calc_repo_ratio(fonoloji_data)
+            if repo_ratio is None:
+                keys = list(fonoloji_data.keys()) if isinstance(fonoloji_data, dict) else []
+                fonoloji_error = f"_calc_repo_ratio None, data keys: {keys}"
 
         # ---- Hesaplamalar ----
         cash_buffer = None
@@ -455,6 +464,7 @@ def analyze_stress_test(
             "aum_change_7d": aum_change_7d,
             "investor_count": inv,
             "investor_change_7d": inv_change_7d,
+            "_fonoloji_error": fonoloji_error,
             "repo_ratio": repo_ratio,
             "cash_buffer": cash_buffer,
             "coverable_exit": coverable_exit,

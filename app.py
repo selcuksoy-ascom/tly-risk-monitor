@@ -619,8 +619,9 @@ else:
             st.metric("Nakit Tamponu", cash_display,
                       help="Fonun hisse satmadan kullanabileceği hazır nakit (ters repo). Yüksek olması panik anında hisse satma zorunluluğunu azaltır.")
         else:
+            diag = stress.get("_fonoloji_error", "") if stress else ""
             st.metric("Nakit Tamponu", "Fonoloji verisi yok",
-                      help="Fonoloji API'sinden ters repo verisi çekilemedi. API anahtarını config.py'de kontrol edin.")
+                      help=f"Fonoloji API hatasi: {diag}" if diag else "Fonoloji API'sinden ters repo verisi çekilemedi.")
 
     with sc5:
         if coverable_exit is not None:
