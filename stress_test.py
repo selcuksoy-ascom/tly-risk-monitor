@@ -19,6 +19,16 @@ FUND_CODE = "TLY"
 FUND_KIND = "YAT"
 HISTORY_DAYS = 90  # parametresiz cagrildiginda cekilecek gun sayisi
 
+# TLY fonunun tarihteki en buyuk 5 NAV dususu
+# Kaynak: Fonoloji /v1/funds/TLY endpoint'i free tier'da 401 verdigi icin hardcoded
+HISTORICAL_STRESS_EVENTS = [
+    {"start": "2023-04-03", "end": "2023-05-16", "drawdown_pct": -32.96, "days": 43},
+    {"start": "2024-05-17", "end": "2024-07-30", "drawdown_pct": -29.62, "days": 74},
+    {"start": "2023-11-29", "end": "2023-12-26", "drawdown_pct": -23.46, "days": 27},
+    {"start": "2025-03-18", "end": "2025-03-24", "drawdown_pct": -23.24, "days": 6},
+    {"start": "2024-09-25", "end": "2024-09-30", "drawdown_pct": -22.47, "days": 5},
+]
+
 # Uyari esikleri
 CASH_BUFFER_CRITICAL = 10.0       # %10 alti kritik
 INVESTOR_DROP_WARNING = -1.0      # %1 dusus uyari
@@ -176,6 +186,57 @@ def _consecutive_small_aum_drops(df: pd.DataFrame, n: int = 3) -> bool:
             return False
 
     return True
+
+
+def get_historical_stress_comparison(stress_level: str, nav_trend: str) -> str:
+    """Mevcut stres seviyesini tarihsel en kotu 5 NAV dususuyle karsilastirir.
+
+    Args:
+        stress_level: "high", "medium", veya "low"
+        nav_trend: "up", "down", veya "flat"
+
+    Returns:
+        Tarihsel karsilastirma metni (Turkce).
+    """
+    lines = []
+    event_lines = []
+    for i, ev in enumerate(HISTORICAL_STRESS_EVENTS, 1):
+        event_lines.append(
+            f"  {i}. {ev['start']} -> {ev['end']}: %{ev['drawdown_pct']:.2f} ({ev['days']} gun)"
+        )
+    events_text = "\n".join(event_lines)
+
+    if stress_level == "high" and nav_trend == "down":
+        worst = HISTORICAL_STRESS_EVENTS[0]
+        lines.append(
+            f"Mevcut yuksek stres ve dusen NAV trendi, tarihteki en kotu "
+            f"5 NAV cokusuyle karsilastirilabilir duzeyde. "
+            f"En sert dusus %{abs(worst['drawdown_pct']):.1f} ile "
+            f"{worst['start']} - {worst['end']} arasinda ({worst['days']} gun) gerceklesmisti."
+        )
+        lines.append(events_text)
+    elif stress_level == "high":
+        lines.append(
+            f"Stres seviyesi yuksek ancak NAV trendi henuz belirgin bir dusus "
+            f"gostermiyor. Tarihteki en kotu 5 NAV cokusu asagidadir. "
+            f"Mevcut durum henuz bu seviyelerde degil."
+        )
+        lines.append(events_text)
+    elif stress_level == "medium":
+        lines.append(
+            f"Stres seviyesi orta duzeyde. Tarihte cok daha sert donemler goruldu. "
+            f"Ornegin en sert dusus %{abs(HISTORICAL_STRESS_EVENTS[0]['drawdown_pct']):.1f} "
+            f"({HISTORICAL_STRESS_EVENTS[0]['start']} - {HISTORICAL_STRESS_EVENTS[0]['end']}). "
+            f"Su anki durum kontrol altinda."
+        )
+    else:
+        lines.append(
+            f"Dusuk stres seviyesi. Tarihsel NAV cokusleriyle karsilastirildiginda "
+            f"fon su an sakin bir donemden geciyor. En sert 5 tarihsel dusus:"
+        )
+        lines.append(events_text)
+
+    return "\n".join(lines)
 
 
 def analyze_stress_test(df_history: Optional[pd.DataFrame] = None) -> Optional[Dict[str, Any]]:
@@ -380,6 +441,8 @@ def analyze_stress_test(df_history: Optional[pd.DataFrame] = None) -> Optional[D
         else:
             stress_level = "low"
 
+        historical_stress_comparison = get_historical_stress_comparison(stress_level, nav_trend)
+
         return {
             "nav": nav,
             "nav_change": nav_change,
@@ -399,6 +462,7 @@ def analyze_stress_test(df_history: Optional[pd.DataFrame] = None) -> Optional[D
             "stress_level": stress_level,
             "triggered_rule_count": rule_count,
             "warnings": warnings,
+            "historical_stress_comparison": historical_stress_comparison,
         }
     except Exception:
         return None

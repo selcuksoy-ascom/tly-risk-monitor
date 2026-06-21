@@ -433,6 +433,14 @@ def print_stress_test(stress: Optional[Dict[str, Any]]) -> None:
     print(f"  Dusuk {C_GREEN}✅{C_RESET}  /  Orta {C_YELLOW}⚠️{C_RESET}  /  Yuksek {C_RED}🚨{C_RESET}")
     print(f"  Mevcut Seviye: {level_display}")
 
+    # Tarihsel stres karsilastirmasi
+    historical = stress.get("historical_stress_comparison")
+    if historical:
+        print()
+        print(C_WHITE + "[ TARİHSEL STRES KARŞILAŞTIRMASI ]" + C_RESET)
+        for line in historical.split("\n"):
+            print(line)
+
     # Uyarilar
     if warnings:
         print()

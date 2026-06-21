@@ -131,10 +131,19 @@ def main() -> None:
     from rotation_tracker import analyze_rotation
     rotation_result = analyze_rotation()
 
+    # ----- ADIM 8b: Gunluk Ozet -----
+    from summary_generator import generate_daily_summary
+    daily_summary = generate_daily_summary(
+        stress=stress_result,
+        analysis=analysis,
+        fund_health=fund_health,
+        rotation=rotation_result,
+        sim=sim_result,
+    )
+
     # ----- ADIM 9: Raporu yazdır -----
     from reporter import (
         print_header,
-        print_net_portfolio_effect,
         print_risk_table,
         print_systemic_risk,
         print_simulation,
@@ -146,7 +155,6 @@ def main() -> None:
     )
 
     print_header(report_date=date.today())
-    print_net_portfolio_effect(analysis["per_stock"])
     print_risk_table(analysis["per_stock"])
     print_systemic_risk(analysis["systemic"])
     print_fund_health(fund_health)
@@ -154,6 +162,18 @@ def main() -> None:
     print_rotation_analysis(rotation_result)
     print_simulation(sim_result)
     print_critical_alerts(analysis["critical_alerts"], analysis["rotation_logs"], analysis["thin_market_alerts"])
+
+    # ----- GUNLUK OZET -----
+    print()
+    print(C_WHITE + "[ GÜNLÜK ÖZET ]" + C_RESET)
+    sl = stress_result.get("stress_level", "low") if stress_result else "low"
+    if sl == "high":
+        print(C_RED + f"  {daily_summary}" + C_RESET)
+    elif sl == "medium":
+        print(C_YELLOW + f"  {daily_summary}" + C_RESET)
+    else:
+        print(C_GREEN + f"  {daily_summary}" + C_RESET)
+
     print_footer()
 
     # ----- ADIM 10: Özet çıkış kodu -----

@@ -23,6 +23,7 @@ from risk_analyzer import analyze_portfolio
 from simulator import run_simulation
 from tefas_fetcher import analyze_fund_health
 from stress_test import analyze_stress_test
+from summary_generator import generate_daily_summary
 from money_flow import (
     fetch_full_history, analyze_money_flow,
     export_to_excel, current_month_highlight,
@@ -228,6 +229,27 @@ fund_health = analyze_fund_health()
 
 analysis = analyze_portfolio(portfolio_data, fund_health=fund_health)
 sim = run_simulation(capital=capital, equity_ratio=equity_ratio, panic_rate=panic_rate)
+
+# Stres testi ve rotasyon (erken hesapla, ozet icin gerekli)
+stress = analyze_stress_test()
+rotation = fetch_rotation_data()
+
+# Gunluk ozet
+summary_text = generate_daily_summary(
+    stress=stress, analysis=analysis,
+    fund_health=fund_health, rotation=rotation, sim=sim,
+)
+stress_level = stress.get("stress_level", "low") if stress else "low"
+
+# ---------------------------------------------------------------------------
+# Gunluk Ozet (sayfanin en ustunde, terimler sozlugunden sonra)
+# ---------------------------------------------------------------------------
+if stress_level == "high":
+    st.error(f"### 🚨 GÜNLÜK ÖZET\n\n{summary_text}")
+elif stress_level == "medium":
+    st.warning(f"### ⚠️ GÜNLÜK ÖZET\n\n{summary_text}")
+else:
+    st.success(f"### ✅ GÜNLÜK ÖZET\n\n{summary_text}")
 
 # ---------------------------------------------------------------------------
 # Özet metrikler
@@ -528,9 +550,11 @@ else:
 st.markdown("---")
 st.markdown("### 🧪 Stres Testi & Fon Sağlığı")
 
-# Stres testi: tam gecmis veriyle cek (cache'li, hizli mod yeterli)
-tefas_full_raw = fetch_tefas_data(fast_mode=True)
-stress = analyze_stress_test(df_history=tefas_full_raw if tefas_full_raw is not None else None)
+# Stres testi: tam gecmis veriyle yeniden cek (daily_aum_std icin gerekli)
+# Ozet icin yukarida basic stress hesaplandi, burada full history ile zenginlestir
+full_history_df = fetch_tefas_data(fast_mode=True)
+if full_history_df is not None:
+    stress = analyze_stress_test(df_history=full_history_df)
 
 if stress is None:
     st.caption("Stres testi verisi şu anda çekilemiyor (TEFAS veya Fonoloji erişilemez).")
@@ -652,7 +676,7 @@ else:
 st.markdown("---")
 st.markdown("### 🔄 Rotasyon Analizi")
 
-rotation = fetch_rotation_data()
+# rotation yukarida fetch_rotation_data() ile hesaplandi
 
 if rotation is None:
     st.caption("Rotasyon verisi şu anda çekilemiyor (Fonoloji API erişilemez).")

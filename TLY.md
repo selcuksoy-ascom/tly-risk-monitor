@@ -35,6 +35,7 @@ python main_android.py
 | `stress_test.py` | Stres testi: 10 kuralla tam geçmiş veri analizi, konsantrasyon riski | app.py, main.py |
 | `rotation_tracker.py` | **YENİ** — Fonoloji aylık holdings ile rotasyon tespiti ve havuz analizi | app.py, main.py |
 | `money_flow.py` | Gelişmiş para akışı analizi (tüm geçmiş) | app.py |
+| `summary_generator.py` | **YENİ** — Kural tabanlı günlük özet ve otomatik yorum (AI yok) | app.py, main.py |
 | `reporter.py` | Terminal rapor formatı (colorama + tabulate) | main.py |
 | `TLY.md` | **Bu dosya** — proje dokümantasyonu | Claude |
 
@@ -132,6 +133,11 @@ TEFAS tam geçmiş (2021-06-15'ten) + Fonoloji verilerini birleştirir.
 9. Yatırımcı sabit + AUM 3g hafif düşüş → ⚠️ UYARI
 10. 2+ kural aynı anda → 🚨 SİSTEMİK STRES
 
+**Tarihsel Stres Karşılaştırması (YENİ):**
+Fonoloji /v1/funds/TLY endpoint'i 401 verdiği için 5 tarihsel NAV çöküşü hardcoded tanımlanmıştır.
+Mevcut stres seviyesi ve NAV trendi bu dönemlerle karşılaştırılır.
+Rapor çıktısında `[ TARİHSEL STRES KARŞILAŞTIRMASI ]` bölümünde görünür.
+
 ---
 
 ## Rotasyon Analizi (rotation_tracker.py) — YENİ
@@ -151,6 +157,40 @@ Fonoloji holdings API'sinden son 6 aylık veriyi (`?report_date=YYYY-MM-DD`) çe
 - Rotasyon geçmişi expander'ı (son ay bilgisi)
 - 3 metrik kutusu: İzlenen Havuz, Zirve Yapan, Taze Aday
 - Zirveler ve taze aday listesi
+
+---
+
+---
+
+## Günlük Özet (summary_generator.py) — YENİ
+
+Tüm modüllerden gelen verileri birleştirerek tek paragraf Türkçe özet üretir.
+AI/LLM kullanmaz, tamamen kural tabanlı if/else mantığıyla çalışır.
+
+### Öncelik Sırası
+
+**Öncelik 1 — Kritik:**
+- Çift likidite kilidi (OZATD + DSTKF)
+- Grup sarmalı (TERA/TRHOL/TEHOL)
+- Taban serisi
+- Yüksek stres (3+ kural)
+- Net portföy etkisi < -%3
+
+**Öncelik 2 — Orta:**
+- Orta stres (1-2 kural)
+- Rotasyon havuzu daralması
+- Konsantrasyon artışı (>%15)
+- NAV 5 gün art arda düşüş
+
+**Öncelik 3 — Düşük:**
+- Sakin gün, hiçbir şey tetiklenmemiş
+
+### Kullanılan Fonksiyonlar
+- `generate_daily_summary(stress, analysis, fund_health, rotation, sim)` — Ana fonksiyon
+
+### Yerleşim
+- **app.py:** Başlıktan sonra, Terimler Sözlüğü'nden önce (yeşil/sarı/kırmızı kutu)
+- **main.py:** Raporun en altında, alt bilgiden önce `[ GÜNLÜK ÖZET ]` başlığıyla
 
 ---
 
@@ -215,8 +255,9 @@ Bu formül AUM değişiminden NAV kaynaklı değişimi çıkararak gerçek para 
 ## app.py — Streamlit Web Arayüzü (Bölüm Sırası)
 
 1. **Başlık** — TLY Risk Analiz Raporu, bugünün tarihi
-2. **Terimler Sözlüğü** — Tüm terimlerin açıklandığı expandable referans tablosu (📖)
-3. **Portföy Özeti** — 5 metrik kartı (tooltip'li)
+2. **Günlük Özet** — Otomatik özet kutusu (yeşil/sarı/kırmızı, stres seviyesine göre)
+3. **Terimler Sözlüğü** — Tüm terimlerin açıklandığı expandable referans tablosu (📖)
+4. **Portföy Özeti** — 5 metrik kartı (tooltip'li)
 4. **Risk Skoru Tablosu** — Hisse bazlı renkli tablo, başlıklarda ⓘ hover tooltip + Sütun Açıklamaları expander'ı
 5. **Sistemik Risk** — Korelasyon göstergesi + progress bar (tooltip'li)
 6. **T+2 Valör Simülasyonu** — 3 günlük panik senaryosu (tüm metrikler tooltip'li)
@@ -261,6 +302,7 @@ Tüm harici veri çekme fonksiyonları hata durumunda **None döner**, programı
 
 | Tarih | Commit | Açıklama |
 |---|---|---|
+| 2026-06-21 | — | summary_generator.py eklendi (kural tabanlı günlük özet); stress_test.py'ye tarihsel stres karşılaştırması eklendi; Fonoloji API X-API-Key + User-Agent header düzeltmesi; nakit tamponu latestPeriod filtrelemesi; app.py ve main.py'ye özet entegre edildi |
 | 2026-06-19 | — | KURAL 5 eklendi: Taban serisi tespiti (tek taban=uyari, cift taban=kritik); PEKGY.IS fund yerine anchor yapildi; Fonoloji API debug log eklendi |
 | 2026-06-19 | — | risk_analyzer.py: Sayısal tip zorlaması (float/int) eklendi, tüm karşılaştırmalar TypeError'a karşı korumalı |
 | 2026-06-19 | — | app.py: analyze_portfolio çağrısına try/except eklendi, hata detayı gösteriliyor |
