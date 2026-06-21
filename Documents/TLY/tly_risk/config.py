@@ -27,7 +27,7 @@ PORTFOLIO = {
     "PEKGY.IS": {
         "name": "Peker GYO",
         "weight": 9.89,
-        "category": "other",
+        "category": "fund",  # GYF — hacim bazlı likidite kuralları uygulanmaz
         "prev_weight": 9.89,
     },
     "TRHOL.IS": {
@@ -73,3 +73,6 @@ PRICE_DROP_THRESHOLD = -5.0
 
 # Veri çekme için geçmiş gün sayısı
 HISTORY_DAYS = 30
+
+# Fonoloji API anahtarı (https://fonoloji.com)
+FONOLOJI_API_KEY = ""

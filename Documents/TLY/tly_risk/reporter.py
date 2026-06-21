@@ -263,14 +263,15 @@ def _fmt_tl_short(value: float) -> str:
         return f"{value:,.0f} TL"
 
 
-def _fmt_trend(trend: str) -> str:
-    """Trend yönünü sembolleştir."""
+def _fmt_trend(trend: str, trend_pct: Optional[float] = None) -> str:
+    """Trend yönünü sembolleştirir, varsa yüzde değişimi de ekler."""
+    pct_str = f" (%{trend_pct:+.2f})" if trend_pct is not None else ""
     if trend == "up":
-        return C_GREEN + "/\\ Buyuyor" + C_RESET
+        return C_GREEN + f"/\\ Buyuyor{pct_str}" + C_RESET
     elif trend == "down":
-        return C_RED + "\\/ Daraliyor" + C_RESET
+        return C_RED + f"\\/ Daraliyor{pct_str}" + C_RESET
     else:
-        return C_YELLOW + "-- Yatay" + C_RESET
+        return C_YELLOW + f"-- Yatay{pct_str}" + C_RESET
 
 
 def print_fund_health(health: Optional[Dict[str, Any]]) -> None:
@@ -304,7 +305,8 @@ def print_fund_health(health: Optional[Dict[str, Any]]) -> None:
         sign = "+" if inv_change_7d > 0 else ""
         inv_str += f"  ({sign}{inv_change_7d:.0f} haftalık)"
 
-    trend_str = _fmt_trend(trend)
+    trend_pct = health.get("trend_pct")
+    trend_str = _fmt_trend(trend, trend_pct)
 
     print(f"  {'NAV Fiyatı':<20}: {nav_str}")
     print(f"  {'Fon Büyüklüğü':<20}: {aum_str}")
@@ -319,6 +321,193 @@ def print_fund_health(health: Optional[Dict[str, Any]]) -> None:
                 print(C_RED + f"  {w}" + C_RESET)
             else:
                 print(C_YELLOW + f"  {w}" + C_RESET)
+
+
+# ---------------------------------------------------------------------------
+# Stres Testi & Fon Sagligi
+# ---------------------------------------------------------------------------
+
+def _fmt_tl_billion(value: float) -> str:
+    """TL degerini milyar formatinda yaz."""
+    if value is None:
+        return "N/A"
+    return f"{value/1e9:.1f} milyar TL"
+
+
+def _fmt_trend_arrow(trend: str, trend_pct: Optional[float] = None) -> str:
+    """NAV trend yonunu sembollestirir, varsa yuzde degisimi de ekler."""
+    pct_str = f" (%{trend_pct:+.2f})" if trend_pct is not None else ""
+    if trend == "up":
+        return C_GREEN + f"↗ Yukseliyor{pct_str}" + C_RESET
+    elif trend == "down":
+        return C_RED + f"↘ Dusuyor{pct_str}" + C_RESET
+    else:
+        return C_YELLOW + f"→ Yatay{pct_str}" + C_RESET
+
+
+def print_stress_test(stress: Optional[Dict[str, Any]]) -> None:
+    """Stres testi ve fon sagligi bolumunu yazdir. Veri yoksa sessizce atlar."""
+    if stress is None:
+        return
+
+    print()
+    print(C_WHITE + "[ STRES TESTI & FON SAGLIGI ]" + C_RESET)
+
+    nav = stress.get("nav")
+    nav_change = stress.get("nav_change")
+    aum = stress.get("aum")
+    aum_change_7d = stress.get("aum_change_7d")
+    inv = stress.get("investor_count")
+    inv_change_7d = stress.get("investor_change_7d")
+    repo_ratio = stress.get("repo_ratio")
+    cash_buffer = stress.get("cash_buffer")
+    coverable_exit = stress.get("coverable_exit")
+    nav_trend = stress.get("nav_trend", "flat")
+    stress_level = stress.get("stress_level", "low")
+    warnings = stress.get("warnings", [])
+
+    # NAV Fiyati
+    nav_str = f"{nav:,.4f} TL" if nav is not None else "N/A"
+    if nav_change is not None:
+        sign = "+" if nav_change > 0 else ""
+        nav_str += f"  ({sign}{nav_change:.2f}% bugun)"
+
+    # Fon Buyuklugu (AUM)
+    aum_str = _fmt_tl_billion(aum) if aum is not None else "N/A"
+    if aum_change_7d is not None:
+        sign = "+" if aum_change_7d > 0 else ""
+        aum_str += f"  ({sign}{aum_change_7d:.1f}% haftalik)"
+
+    # Yatirimci Sayisi
+    inv_str = f"{inv:,}" if inv is not None else "N/A"
+    if inv_change_7d is not None:
+        sign = "+" if inv_change_7d > 0 else ""
+        inv_str += f"  ({sign}{inv_change_7d:.0f} haftalik)"
+
+    # Nakit Tamponu
+    if repo_ratio is not None:
+        cash_str = f"%{repo_ratio:.2f} ters repo"
+        if cash_buffer is not None:
+            cash_str += f" = ~{_fmt_tl_billion(cash_buffer)}"
+    else:
+        cash_str = "N/A"
+
+    # Karsilanabilir Cikis
+    if coverable_exit is not None:
+        exit_str = f"%{coverable_exit:.2f} yatirimci ayni anda cikabilir"
+    else:
+        exit_str = "N/A"
+
+    # NAV Trend
+    nav_trend_pct = stress.get("nav_trend_pct")
+    trend_str = _fmt_trend_arrow(nav_trend, nav_trend_pct)
+
+    # Konsantrasyon orani
+    conc = stress.get("concentration_ratio")
+    conc_change = stress.get("concentration_change_30d")
+    conc_str = f"{conc:.1f} milyon TL/kisi" if conc is not None else "N/A"
+    if conc_change is not None:
+        sign = "+" if conc_change > 0 else ""
+        conc_str += f"  (30g: {sign}{conc_change:.1f}%)"
+
+    print(f"  {'NAV Fiyati':<24}: {nav_str}")
+    print(f"  {'Fon Buyuklugu (AUM)':<24}: {aum_str}")
+    print(f"  {'Yatirimci Sayisi':<24}: {inv_str}")
+    print(f"  {'Konsantrasyon Orani':<24}: {conc_str}")
+    print(f"  {'Nakit Tamponu':<24}: {cash_str}")
+    print(f"  {'Karsilanabilir Cikis':<24}: {exit_str}")
+    print(f"  {'NAV Trend (5 gun)':<24}: {trend_str}")
+
+    # Stres Seviyesi
+    print()
+    rule_count = stress.get("triggered_rule_count", 0)
+    print(C_WHITE + "[ STRES SEVIYESI ]" + C_RESET)
+
+    if stress_level == "high":
+        level_display = C_RED + f"Yuksek 🚨 ({rule_count} kural tetiklendi)" + C_RESET
+    elif stress_level == "medium":
+        level_display = C_YELLOW + f"Orta ⚠️ ({rule_count} kural tetiklendi)" + C_RESET
+    else:
+        level_display = C_GREEN + f"Dusuk ✅" + C_RESET
+
+    print(f"  Dusuk {C_GREEN}✅{C_RESET}  /  Orta {C_YELLOW}⚠️{C_RESET}  /  Yuksek {C_RED}🚨{C_RESET}")
+    print(f"  Mevcut Seviye: {level_display}")
+
+    # Uyarilar
+    if warnings:
+        print()
+        for w in warnings:
+            if "KRITIK" in w or "SISTEMIK" in w:
+                print(C_RED + f"  {w}" + C_RESET)
+            else:
+                print(C_YELLOW + f"  {w}" + C_RESET)
+
+
+# ---------------------------------------------------------------------------
+# Rotasyon Analizi
+# ---------------------------------------------------------------------------
+
+def print_rotation_analysis(rotation: Optional[Dict[str, Any]]) -> None:
+    """Rotasyon analizi bolumunu yazdir. Veri yoksa sessizce atlar."""
+    if rotation is None:
+        return
+
+    print()
+    print(C_WHITE + "[ ROTASYON ANALIZI ]" + C_RESET)
+
+    rotations = rotation.get("rotations", [])
+    rotation_pairs = rotation.get("rotation_pairs", [])
+    pool = rotation.get("pool", {})
+    pool_warning = rotation.get("pool_warning")
+
+    # Rotasyon gecmisi
+    if rotations:
+        print(C_CYAN + "  Son 6 Ay Rotasyon Gecmisi:" + C_RESET)
+        for r in rotations:
+            stock_short = r["stock"].replace(".IS", "")
+            direction = "↗" if r["change_pp"] > 0 else "↘"
+            print(
+                f"    {r['month']}: {direction} {stock_short} "
+                f"%{r['from_weight']:.1f} → %{r['to_weight']:.1f}"
+            )
+    else:
+        print("  Son 6 ayda rotasyon tespit edilmedi.")
+
+    # Rotasyon ciftleri
+    if rotation_pairs:
+        print()
+        print(C_YELLOW + "  Doldur-Bosalt Desenleri:" + C_RESET)
+        for rp in rotation_pairs:
+            a_short = rp["stock_a"].replace(".IS", "")
+            b_short = rp["stock_b"].replace(".IS", "")
+            print(
+                f"    {rp['month']}: {a_short} {rp['delta_a']:+.1f}pp  /  "
+                f"{b_short} {rp['delta_b']:+.1f}pp"
+            )
+
+    # Havuz durumu
+    if pool:
+        print()
+        print(C_WHITE + "  Sig Hisse Havuzu:" + C_RESET)
+        print(f"    Toplam: {pool.get('total', 0)}")
+        print(f"    Son 6 Ayda Zirve Yapan: {pool.get('used', 0)}")
+        print(f"    Kalan Taze Aday: {pool.get('remaining', 0)}")
+
+        peaks = pool.get("peaks", [])
+        if peaks:
+            print(C_CYAN + "    Zirveler:" + C_RESET)
+            for p in peaks:
+                stock_short = p["stock"].replace(".IS", "")
+                print(f"      {p['month']}: {stock_short} → %{p['weight']:.1f}")
+
+        fresh = pool.get("fresh", [])
+        if fresh:
+            fresh_names = ", ".join(s.replace(".IS", "") for s in fresh)
+            print(C_GREEN + f"    Taze Aday: {fresh_names}" + C_RESET)
+
+    if pool_warning:
+        print()
+        print(C_YELLOW + f"  {pool_warning}" + C_RESET)
 
 
 # ---------------------------------------------------------------------------

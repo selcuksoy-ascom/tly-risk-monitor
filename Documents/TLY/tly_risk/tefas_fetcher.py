@@ -134,11 +134,13 @@ def analyze_fund_health() -> Optional[Dict[str, Any]]:
 
         # 30G Trend: son 5 günlük ortalama vs önceki 5
         trend = "flat"
-        if len(valid_df) >= 30:
+        trend_pct = None
+        if len(valid_df) >= 10:
             recent_5 = valid_df[price_col].iloc[-5:].mean()
             prev_5 = valid_df[price_col].iloc[-10:-5].mean()
             if prev_5 > 0:
                 diff = (recent_5 - prev_5) / prev_5
+                trend_pct = round(diff * 100.0, 2)
                 if diff > 0.002:
                     trend = "up"
                 elif diff < -0.002:
@@ -152,6 +154,7 @@ def analyze_fund_health() -> Optional[Dict[str, Any]]:
             "investor_count": inv,
             "investor_change_7d": inv_change_7d,
             "trend": trend,
+            "trend_pct": trend_pct,
             "warnings": warnings,
         }
     except Exception:
