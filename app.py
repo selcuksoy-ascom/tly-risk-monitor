@@ -231,7 +231,9 @@ analysis = analyze_portfolio(portfolio_data, fund_health=fund_health)
 sim = run_simulation(capital=capital, equity_ratio=equity_ratio, panic_rate=panic_rate)
 
 # Stres testi ve rotasyon (erken hesapla, ozet icin gerekli)
-stress = analyze_stress_test()
+# Tek seferde cek: once TEFAS gecmisi, sonra stress_test (Fonoloji API dahil)
+tefas_full_raw = fetch_tefas_data(fast_mode=True)
+stress = analyze_stress_test(df_history=tefas_full_raw if tefas_full_raw is not None else None)
 rotation = fetch_rotation_data()
 
 # Gunluk ozet
@@ -550,11 +552,7 @@ else:
 st.markdown("---")
 st.markdown("### 🧪 Stres Testi & Fon Sağlığı")
 
-# Stres testi: tam gecmis veriyle yeniden cek (daily_aum_std icin gerekli)
-# Ozet icin yukarida basic stress hesaplandi, burada full history ile zenginlestir
-full_history_df = fetch_tefas_data(fast_mode=True)
-if full_history_df is not None:
-    stress = analyze_stress_test(df_history=full_history_df)
+# stress yukarida analyze_stress_test(df_history=tefas_full_raw) ile hesaplandi
 
 if stress is None:
     st.caption("Stres testi verisi şu anda çekilemiyor (TEFAS veya Fonoloji erişilemez).")
