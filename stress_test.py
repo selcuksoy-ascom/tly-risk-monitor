@@ -287,53 +287,78 @@ def _scrape_fonoloji_public() -> Dict[str, Any]:
         # Yatirimci sayisi
         result["investor_count"] = _try_int(r'(?:Yatırımcı|Yatirimci)[^0-9]*?(\d{1,3}(?:\.\d{3})*(?:,\d+)?)', html)
 
-        # ===== VARLIK DAGILIMI: bilinen varlik sinifi isimlerine gore hedefle =====
+        # ===== VARLIK DAGILIMI: progress bar width uzerinden kazir =====
+        # Allocation bolumunde her varlik sinifi icin bir progress bar var:
+        # <span class="truncate">Nakit / Mevduat</span> ...
+        # <span style="width:15.64%"></span>
+        # Bu yapi sadece varlik dagiliminda var, gunluk degisim bolumunde yok.
         alloc = {}
-        KNOWN_CLASSES = [
-            (r'Hisse\s*Senedi', 'Hisse Senedi'),
-            (r'Devlet\s*(?:Tahvili|İç\s*Borçlanma)', 'Devlet Tahvili'),
-            (r'Özel\s*Sektör', 'Ozel Sektor'),
-            (r'Nakit\s*(?:/\s*Mevduat)?', 'Nakit / Mevduat'),
-            (r'Mevduat', 'Nakit / Mevduat'),
-            (r'Diğer', 'Diger'),
-        ]
-        for pat, label in KNOWN_CLASSES:
-            m = re.search(pat + r'[^%]*%(\d+[.,]\d+)', html)
-            if m:
-                try:
-                    val = float(m.group(1).replace(',', '.'))
-                    alloc[label] = val
-                    # Ilk kez yakalanan cash/equity
-                    if label == 'Nakit / Mevduat' and result["cash_ratio"] is None:
-                        result["cash_ratio"] = val
-                    if label == 'Hisse Senedi' and result["equity_ratio"] is None:
-                        result["equity_ratio"] = val
-                except (ValueError, IndexError):
-                    pass
+        for m in re.finditer(
+            r'<span\s+class="truncate">([^<]+)</span>'
+            r'.*?'
+            r'style="width:\s*(\d+[.,]\d+)%\s*;[^"]*"',
+            html, re.DOTALL,
+        ):
+            name = m.group(1).strip()
+            try:
+                val = float(m.group(2).replace(',', '.'))
+                alloc[name] = val
+                if result["cash_ratio"] is None and ('nakit' in name.lower() or 'mevduat' in name.lower()):
+                    result["cash_ratio"] = val
+                if result["equity_ratio"] is None and 'hisse' in name.lower():
+                    result["equity_ratio"] = val
+            except (ValueError, IndexError):
+                pass
         if alloc:
             result["asset_allocation"] = alloc
 
-        # Fallback: daha genis varlik dagilimi regex (sadece bilinen siniflar yoksa)
+        # Fallback: orijinal regex yaklasimi (progress bar bulunamazsa)
         if not alloc:
-            for m in re.finditer(r'(Hisse\s*Senedi|Nakit[^%]*|Mevduat[^%]*|Özel\s*Sektör|Devlet\s*Tahvili|Diğer)[^%]*%(\d+[.,]\d+)', html):
-                name = m.group(1).strip()
-                try:
-                    val = float(m.group(2).replace(',', '.'))
-                    alloc[name] = val
-                except (ValueError, IndexError):
-                    pass
+            KNOWN_CLASSES = [
+                (r'Hisse\s*Senedi', 'Hisse Senedi'),
+                (r'Devlet\s*(?:Tahvili|İç\s*Borçlanma)', 'Devlet Tahvili'),
+                (r'Özel\s*Sektör', 'Ozel Sektor'),
+                (r'Nakit\s*/\s*Mevduat', 'Nakit / Mevduat'),
+                (r'Nakit', 'Nakit / Mevduat'),
+                (r'Mevduat', 'Nakit / Mevduat'),
+                (r'Diğer', 'Diger'),
+            ]
+            for pat, label in KNOWN_CLASSES:
+                m = re.search(pat + r'[^%]*%(?:<!--[^>]*-->)?\s*(\d+[.,]\d+)', html)
+                if m:
+                    try:
+                        val = float(m.group(1).replace(',', '.'))
+                        alloc[label] = val
+                        if label == 'Nakit / Mevduat' and result["cash_ratio"] is None:
+                            result["cash_ratio"] = val
+                        if label == 'Hisse Senedi' and result["equity_ratio"] is None:
+                            result["equity_ratio"] = val
+                    except (ValueError, IndexError):
+                        pass
             if alloc:
                 result["asset_allocation"] = alloc
-                if result["cash_ratio"] is None:
-                    for k, v in alloc.items():
-                        if 'nakit' in k.lower() or 'mevduat' in k.lower():
-                            result["cash_ratio"] = v
-                            break
-                if result["equity_ratio"] is None:
-                    for k, v in alloc.items():
-                        if 'hisse' in k.lower():
-                            result["equity_ratio"] = v
-                            break
+
+            # Daha genis fallback
+            if not alloc:
+                for m in re.finditer(r'(Hisse\s*Senedi|Nakit[^%]*|Mevduat[^%]*|Özel\s*Sektör|Devlet\s*Tahvili|Diğer)[^%]*%(?:<!--[^>]*-->)?\s*(\d+[.,]\d+)', html):
+                    name = m.group(1).strip()
+                    try:
+                        val = float(m.group(2).replace(',', '.'))
+                        alloc[name] = val
+                    except (ValueError, IndexError):
+                        pass
+                if alloc:
+                    result["asset_allocation"] = alloc
+                    if result["cash_ratio"] is None:
+                        for k, v in alloc.items():
+                            if 'nakit' in k.lower() or 'mevduat' in k.lower():
+                                result["cash_ratio"] = v
+                                break
+                    if result["equity_ratio"] is None:
+                        for k, v in alloc.items():
+                            if 'hisse' in k.lower():
+                                result["equity_ratio"] = v
+                                break
 
         # Sharpe
         result["sharpe_90d"] = _try_float(r'[Ss]harpe[^0-9]*(\d+[.,]\d+)', html)
