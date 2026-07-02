@@ -2,92 +2,98 @@
 # config.py - TLY Portföy Sabitleri
 # =============================================================================
 # KULLANIM: Her ay KAP raporuna göre ağırlıkları güncelleyin.
-# Son güncelleme: 20 Haziran 2026
+# Son güncelleme: 2 Temmuz 2026 (Haziran 2026 KAP raporu)
 # =============================================================================
 
 PORTFOLIO = {
     "DSTKF.IS": {
         "name": "Destek Faktoring",
-        "weight": 17.71,
+        "weight": 22.84,
         "category": "anchor",
-        "prev_weight": 23.60,
+        "prev_weight": 17.71,
     },
     "OZATD.IS": {
         "name": "Ozata Denizcilik",
-        "weight": 17.16,
+        "weight": 14.29,
         "category": "anchor",
-        "prev_weight": 1.29,
-    },
-    "TERA.IS": {
-        "name": "Tera Yatirim",
-        "weight": 11.50,
-        "category": "group",
-        "prev_weight": 12.86,
+        "prev_weight": 17.16,
     },
     "PEKGY.IS": {
         "name": "Peker GYO",
-        "weight": 9.89,
+        "weight": 7.73,
         "category": "anchor",
-        "prev_weight": 8.51,
-    },
-    "TRHOL.IS": {
-        "name": "Tera Finansal",
-        "weight": 6.59,
-        "category": "group",
-        "prev_weight": 5.98,
+        "prev_weight": 9.89,
     },
     "TEHOL.IS": {
         "name": "Tera Teknoloji",
-        "weight": 5.50,
+        "weight": 7.13,
         "category": "group",
-        "prev_weight": 2.25,
+        "prev_weight": 5.50,
+    },
+    "TERA.IS": {
+        "name": "Tera Yatirim",
+        "weight": 6.63,
+        "category": "group",
+        "prev_weight": 11.50,
+    },
+    "TRHOL.IS": {
+        "name": "Tera Finansal",
+        "weight": 5.61,
+        "category": "group",
+        "prev_weight": 6.59,
     },
     "ANELE.IS": {
         "name": "Anel Elektrik",
-        "weight": 2.15,
+        "weight": 1.99,
         "category": "anchor",
         "prev_weight": 2.15,
     },
+    "SELEC.IS": {
+        "name": "Selcuk Ecza",
+        "weight": 1.04,
+        "category": "anchor",
+        "prev_weight": 0.00,
+    },
     "ALKLC.IS": {
         "name": "Altinkilic Gida",
-        "weight": 0.66,
+        "weight": 0.53,
         "category": "anchor",
-        "prev_weight": 0.70,
+        "prev_weight": 0.66,
     },
     "SVGYO.IS": {
         "name": "Savur GYO",
-        "weight": 0.55,
+        "weight": 0.52,
         "category": "anchor",
-        "prev_weight": 0.32,
-    },
-    "TMPOL.IS": {
-        "name": "Temapol Polimer",
-        "weight": 0.33,
-        "category": "anchor",
-        "prev_weight": 0.40,
+        "prev_weight": 0.55,
     },
     "HEDEF.IS": {
         "name": "Hedef Holding",
-        "weight": 0.28,
+        "weight": 0.27,
         "category": "anchor",
-        "prev_weight": 0.32,
+        "prev_weight": 0.28,
     },
-    "CWENE.IS": {
-        "name": "CW Enerji",
-        "weight": 0.03,
+    "MANAS.IS": {
+        "name": "Manas Enerji",
+        "weight": 0.14,
         "category": "anchor",
-        "prev_weight": 0.07,
+        "prev_weight": 0.00,
+    },
+    "TMPOL.IS": {
+        "name": "Temapol Polimer",
+        "weight": 0.01,
+        "category": "anchor",
+        "prev_weight": 0.33,
     },
     "EUPWR.IS": {
         "name": "Europower Enerji",
-        "weight": 0.03,
+        "weight": 0.01,
         "category": "anchor",
         "prev_weight": 0.03,
     },
 }
 
 # Fonun toplam hisse oranı (%), geri kalan nakit/tahvil gibi sabit varlıklardır
-EQUITY_RATIO = 72.38
+EQUITY_RATIO = 68.74
 
 # Varsayılan sermaye (TL)
 DEFAULT_CAPITAL = 500_000
